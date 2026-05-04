@@ -1,5 +1,6 @@
-## 贴吧大神作品myfancontrol个人续作，原贴请见 https://tieba.baidu.com/p/5971634018?red_tag=1969604114
-## 原仓库请见 https://github.com/xl-Synapse/MyFanControl
+## MyFanControl
+   贴吧大神作品myfancontrol个人续作，原贴请见 https://tieba.baidu.com/p/5971634018?red_tag=1969604114;
+   原仓库请见 https://github.com/xl-Synapse/MyFanControl;
 ## 使用说明
 1. 安装NTPortDrvSetup,压缩包中有。
 
