@@ -5,7 +5,7 @@
 int TEMP_LIST[10] = { 90, 85, 80, 75, 70, 65, 60, 55, 50, 45 };
 
 
-int GetTime(tm *pt, int offset)
+int GetTime(tm* pt, int offset)
 {
 	tm t = { 0 };
 	time_t tt;
@@ -16,7 +16,7 @@ int GetTime(tm *pt, int offset)
 	localtime_s(pt, &tt);
 	return (pt->tm_hour * 10000 + pt->tm_min * 100 + pt->tm_sec);
 }
-int GetTimeInterval(int a, int b, int *p)
+int GetTimeInterval(int a, int b, int* p)
 {
 	//时间差，输入两个6位数时间，如开盘时间91500，得到a-b，并转化为6位数时间，指针p接受以秒计的时间差
 	int a1 = a / 10000;
@@ -34,9 +34,9 @@ int GetTimeInterval(int a, int b, int *p)
 	c = abs(c);
 
 	int d = (c / 3600) * 10000 + (c % 3600) / 60 * 100 + c % 60;
-	return d*sgn;
+	return d * sgn;
 }
-CString GetExePath(){
+CString GetExePath() {
 	char pathbuf[1024] = { 0 };
 	int pathlen = ::GetModuleFileName(NULL, pathbuf, 1024);
 
@@ -57,37 +57,38 @@ CGPUInfo::CGPUInfo()
 {
 	TRACE0("开始加载NVGPU_DLL.dll。\n");
 	m_hGPUdll = NULL;
+	m_nMemOverclockOffset = 0;
 	CString dllpth = GetExePath() + "\\NVGPU_DLL.dll";
 	m_hGPUdll = LoadLibrary(dllpth);
 	if (m_hGPUdll == NULL)
 	{
-		TRACE0("无法加载" + dllpth+"\n");
+		TRACE0("无法加载" + dllpth + "\n");
 		return;
 	}
 
-	m_pfnInitGPU_API = (In_0_Out_n_Func *)::GetProcAddress(m_hGPUdll, "InitGPU_API");
-	m_pfnSet_GPU_Number = (In_1_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Set_GPU_Number");
-	m_pfnGet_GPU_Base_Clock = (In_0_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Get_GPU_Base_Clock");
-	m_pfnGet_GPU_Boost_Clock = (In_0_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Get_GPU_Boost_Clock");
-	m_pfnCheck_GPU_VRAM_Clock = (In_0_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Check_GPU_VRAM_Clock");
-	m_pfnGet_GPU_Graphics_Clock = (In_0_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Get_GPU_Graphics_Clock");
-	m_pfnGet_GPU_Memory_Clock = (In_0_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Get_GPU_Memory_Clock");
-	m_pfnGet_Memory_OC_max = (In_0_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Get_Memory_OC_max");
-	m_pfnGet_GPU_Util = (In_0_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Get_GPU_Util");
-	m_pfnGet_GPU_name = (In_0_Out_s_Func *)::GetProcAddress(m_hGPUdll, "Get_GPU_name");
-	m_pfnGet_GPU_TotalNumber = (In_0_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Get_GPU_TotalNumber");
-	m_pfnGet_GPU_Overclock_range = (In_0_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Get_GPU_Overclock_range");
-	m_pfnGet_Memory_range = (In_0_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Get_Memory_range");
-	m_pfnGet_GPU_Overclock_rangeMax = (In_0_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Get_GPU_Overclock_rangeMax");
-	m_pfnGet_GPU_Overclock_rangeMin = (In_0_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Get_GPU_Overclock_rangeMin");
-	m_pfnGet_Memory_range_max = (In_0_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Get_Memory_range_max");
-	m_pfnGet_Memory_range_min = (In_0_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Get_Memory_range_min");
-	m_pfnGet_NVDeviceID = (In_1_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Get_NVDeviceID");
-	m_pfnLock_Frequency = (In_2_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Lock_Frequency");
-	m_pfnLock_Frequency_MEM = (In_2_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Lock_Frequency_MEM");
-	m_pfnSet_CoreOC = (In_2_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Set_CoreOC");
-	m_pfnSet_MEMOC = (In_2_Out_n_Func *)::GetProcAddress(m_hGPUdll, "Set_MEMOC");
-	m_pfnCloseGPU_API = (In_0_Out_0_Func *)::GetProcAddress(m_hGPUdll, "CloseGPU_API");
+	m_pfnInitGPU_API = (In_0_Out_n_Func*)::GetProcAddress(m_hGPUdll, "InitGPU_API");
+	m_pfnSet_GPU_Number = (In_1_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Set_GPU_Number");
+	m_pfnGet_GPU_Base_Clock = (In_0_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Get_GPU_Base_Clock");
+	m_pfnGet_GPU_Boost_Clock = (In_0_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Get_GPU_Boost_Clock");
+	m_pfnCheck_GPU_VRAM_Clock = (In_0_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Check_GPU_VRAM_Clock");
+	m_pfnGet_GPU_Graphics_Clock = (In_0_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Get_GPU_Graphics_Clock");
+	m_pfnGet_GPU_Memory_Clock = (In_0_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Get_GPU_Memory_Clock");
+	m_pfnGet_Memory_OC_max = (In_0_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Get_Memory_OC_max");
+	m_pfnGet_GPU_Util = (In_0_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Get_GPU_Util");
+	m_pfnGet_GPU_name = (In_0_Out_s_Func*)::GetProcAddress(m_hGPUdll, "Get_GPU_name");
+	m_pfnGet_GPU_TotalNumber = (In_0_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Get_GPU_TotalNumber");
+	m_pfnGet_GPU_Overclock_range = (In_0_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Get_GPU_Overclock_range");
+	m_pfnGet_Memory_range = (In_0_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Get_Memory_range");
+	m_pfnGet_GPU_Overclock_rangeMax = (In_0_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Get_GPU_Overclock_rangeMax");
+	m_pfnGet_GPU_Overclock_rangeMin = (In_0_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Get_GPU_Overclock_rangeMin");
+	m_pfnGet_Memory_range_max = (In_0_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Get_Memory_range_max");
+	m_pfnGet_Memory_range_min = (In_0_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Get_Memory_range_min");
+	m_pfnGet_NVDeviceID = (In_1_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Get_NVDeviceID");
+	m_pfnLock_Frequency = (In_2_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Lock_Frequency");
+	m_pfnLock_Frequency_MEM = (In_2_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Lock_Frequency_MEM");
+	m_pfnSet_CoreOC = (In_2_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Set_CoreOC");
+	m_pfnSet_MEMOC = (In_2_Out_n_Func*)::GetProcAddress(m_hGPUdll, "Set_MEMOC");
+	m_pfnCloseGPU_API = (In_0_Out_0_Func*)::GetProcAddress(m_hGPUdll, "CloseGPU_API");
 
 	//
 	if (m_pfnInitGPU_API())
@@ -104,11 +105,15 @@ CGPUInfo::CGPUInfo()
 	m_nDeviceID = m_pfnGet_NVDeviceID(0);
 	m_nGraphicsRangeMax = m_pfnGet_GPU_Overclock_rangeMax();
 	m_nGraphicsRangeMin = m_pfnGet_GPU_Overclock_rangeMin();
-	m_nMemoryRangeMax = m_pfnGet_Memory_range_max();
-	m_nMemoryRangeMin = m_pfnGet_Memory_range_min();
 
+	// 先计算标准频率和最大频率
 	m_nStandardFrequency = m_nBoostClock - m_nGraphicsRangeMin;
 	m_nMaxFrequency = m_nStandardFrequency + m_nGraphicsRangeMax;
+
+	// 直接使用核心默认频率的正负值作为显存偏移范围
+	m_nMemoryRangeMax = m_nStandardFrequency;
+	m_nMemoryRangeMin = -m_nStandardFrequency;
+
 	m_nLockClock = -1;
 
 	Update();
@@ -120,6 +125,7 @@ CGPUInfo::~CGPUInfo()
 	if (m_hGPUdll != NULL)
 	{
 		LockFrequency();//还原GPU频率设置
+		SetMemOverclockOffset(0);//还原显存偏移
 		m_pfnCloseGPU_API();
 		FreeLibrary(m_hGPUdll);
 		m_hGPUdll = NULL;
@@ -149,7 +155,7 @@ BOOL CGPUInfo::LockFrequency(int frequency)
 	m_nLockClock = frequency;
 
 	int GpuOverclock = 0;
-	int MemOverclock = 0;
+	int MemOverclock = m_nMemOverclockOffset;
 	int GpuClock = 0;
 	//int MemClock = 0;
 	if (frequency > 0 && frequency < m_nStandardFrequency)
@@ -161,7 +167,6 @@ BOOL CGPUInfo::LockFrequency(int frequency)
 	{
 		//超频
 		GpuOverclock = frequency - m_nStandardFrequency;
-		MemOverclock = GpuOverclock * m_nMemoryRangeMax / m_nGraphicsRangeMax;//按照比例进行显存超频
 	}
 
 	//
@@ -178,11 +183,32 @@ BOOL CGPUInfo::LockFrequency(int frequency)
 		AfxMessageBox("Lock_Frequency失败");
 	//
 	int rv4 = 1;
-	//int rv4 = (m_pfnLock_Frequency_MEM(0, MemClock) == 0x19);
+	//
 	if (!rv4)
 		AfxMessageBox("Lock_Frequency_MEM失败");
 	//
 	return (rv1 && rv2 && rv3 && rv4);
+}
+
+BOOL CGPUInfo::SetMemOverclockOffset(int offset)
+{
+	if (!m_hGPUdll)
+		return FALSE;
+
+	if (offset < m_nMemoryRangeMin || offset > m_nMemoryRangeMax)
+		return FALSE;
+
+	m_nMemOverclockOffset = offset;
+
+	int rv = (m_pfnSet_MEMOC(0, offset) == 0);
+	if (!rv)
+	{
+		AfxMessageBox("Set_MEMOC失败");
+		// 失败时自动恢复默认值0，并立即应用到硬件
+		m_pfnSet_MEMOC(0, 0);
+		m_nMemOverclockOffset = 0;
+	}
+	return rv;
 }
 
 CConfig::CConfig()
@@ -210,8 +236,23 @@ void CConfig::LoadDefault()
 	Linear = FALSE;
 	TakeOver = FALSE;
 	ForceTemp = 50;
+	SoftControl = FALSE;
 	LockGPUFrequency = FALSE;
 	GPUFrequency = 0;
+	LockMemOverclock = FALSE;  // 默认关闭显存偏移
+	MemOverclockOffset = 0;
+
+	// 默认温度档位
+	TempThresholds[0] = 90;
+	TempThresholds[1] = 85;
+	TempThresholds[2] = 80;
+	TempThresholds[3] = 75;
+	TempThresholds[4] = 70;
+	TempThresholds[5] = 65;
+	TempThresholds[6] = 60;
+	TempThresholds[7] = 55;
+	TempThresholds[8] = 50;
+	TempThresholds[9] = 45;
 }
 void CConfig::LoadConfig()
 {
@@ -229,6 +270,8 @@ void CConfig::LoadConfig()
 	if (file.GetLength() != sizeof(*this))
 	{
 		file.Close();
+		DeleteFile(strPath);
+		LoadDefault();
 		SaveConfig();
 		if (!file.Open(strPath, CFile::modeRead | CFile::shareDenyNone))
 		{
@@ -247,7 +290,7 @@ void CConfig::LoadConfig()
 }
 void CConfig::SaveConfig()
 {
-	FILE *fp = NULL;
+	FILE* fp = NULL;
 	CString strPath = GetExePath() + "\\MyFanControl.cfg";
 	fp = fopen(strPath, "wb");
 	if (fp == NULL)
@@ -258,8 +301,6 @@ void CConfig::SaveConfig()
 	fwrite(this, sizeof(*this), 1, fp);
 	fclose(fp);
 }
-
-//////////////////////////////////////////////////
 
 CCore::CCore()
 {
@@ -275,16 +316,19 @@ CCore::CCore()
 	m_nInit = 0;
 	m_nExit = 0;
 	m_hInstDLL = NULL;
+	m_nTimerID = 0;  // 初始化定时器ID
 	for (int i = 0; i < 2; i++)
 	{
-		m_nCurTemp[i]=0;//当前温度
-		m_nLastTemp[i]=0;//上一次温度
-		m_nSetDuty[i]=0;//设置的负载
+		m_nCurTemp[i] = 0;//当前温度
+		m_nLastTemp[i] = 0;//上一次温度
+		m_nSetDuty[i] = 0;//设置的负载
 		m_nSetDutyLevel[i] = 0;//设置的转速挡位，最低速档为1，最高速档为10
-		m_nCurDuty[i]=0;//当前负载
-		m_nCurRPM[i]=0;//当前转速
+		m_nCurDuty[i] = 0;//当前负载
+		m_nCurRPM[i] = 0;//当前转速
+		m_nSoftTargetDuty[i] = 0;//软性控制目标
+		m_nSoftCurrentDuty[i] = 0;//软性控制当前
 	}
-	m_bUpdateRPM=0;//是否更新转速，如果为0，只更新风扇温度和负载
+	m_bUpdateRPM = 0;//是否更新转速，如果为0，只更新风扇温度和负载
 	m_nLastUpdateTime = GetTime(0, -5);
 	m_bForcedCooling = FALSE;
 	m_bTakeOverStatus = FALSE;
@@ -292,6 +336,12 @@ CCore::CCore()
 }
 CCore::~CCore()
 {
+	// 确保定时器被清理
+	if (m_nTimerID)
+	{
+		timeKillEvent(m_nTimerID);
+		m_nTimerID = 0;
+	}
 	Uninit();
 }
 
@@ -316,17 +366,15 @@ BOOL CCore::Init()
 		return FALSE;
 	}
 
-	m_pfnInitIo = (InitIo *)::GetProcAddress(m_hInstDLL, "InitIo");
-	m_pfnSetFanDuty = (::SetFanDuty *)::GetProcAddress(m_hInstDLL, "SetFanDuty");
-	m_pfnSetFANDutyAuto = (SetFANDutyAuto *)::GetProcAddress(m_hInstDLL, "SetFanDutyAuto");
-	m_pfnGetTempFanDuty = (GetTempFanDuty *)::GetProcAddress(m_hInstDLL, "GetTempFanDuty");
-	m_pfnGetFANCounter = (GetFANCounter *)::GetProcAddress(m_hInstDLL, "GetFanCount");
+	m_pfnInitIo = (InitIo*)::GetProcAddress(m_hInstDLL, "InitIo");
+	m_pfnSetFanDuty = (::SetFanDuty*)::GetProcAddress(m_hInstDLL, "SetFanDuty");
+	m_pfnSetFANDutyAuto = (SetFANDutyAuto*)::GetProcAddress(m_hInstDLL, "SetFanDutyAuto");
+	m_pfnGetTempFanDuty = (GetTempFanDuty*)::GetProcAddress(m_hInstDLL, "GetTempFanDuty");
+	m_pfnGetFANCounter = (GetFANCounter*)::GetProcAddress(m_hInstDLL, "GetFanCount");
 
-	m_pfnGetECVersion = (GetECVersion *)::GetProcAddress(m_hInstDLL, "GetECVersion");
-	m_pfnGetFANRPM[0] = (GetFanRpm *)::GetProcAddress(m_hInstDLL, "GetCpuFanRpm");
-	m_pfnGetFANRPM[1] = (GetFanRpm *)::GetProcAddress(m_hInstDLL, "GetGpuFanRpm");
-	//m_pfnGetFANRPM[2] = (GetFanRpm *)::GetProcAddress(m_hInstDLL, "GetGpu1FanRpm");
-	//m_pfnGetFANRPM[3] = (GetFanRpm *)::GetProcAddress(m_hInstDLL, "GetX72FanRpm");
+	m_pfnGetECVersion = (GetECVersion*)::GetProcAddress(m_hInstDLL, "GetECVersion");
+	m_pfnGetFANRPM[0] = (GetFanRpm*)::GetProcAddress(m_hInstDLL, "GetCpuFanRpm");
+	m_pfnGetFANRPM[1] = (GetFanRpm*)::GetProcAddress(m_hInstDLL, "GetGpuFanRpm");
 
 	if (m_pfnInitIo == NULL)
 	{
@@ -344,19 +392,6 @@ BOOL CCore::Init()
 		return FALSE;
 	}
 
-	/*
-	int aa = 0, bb = 0;
-	const char *str = m_pfnGetECVersion();
-	int a = m_pfnGetCPUFANRPM();
-	int b = m_pfnGetGPUFANRPM();
-	ECData data1 = m_pfnGetTempFanDuty(1);
-	ECData data2 = m_pfnGetTempFanDuty(2);
-	m_pfnSetFanDuty(1, 128);
-	m_pfnSetFANDutyAuto(1);
-	m_pfnSetFanDuty(2, 128);
-	m_pfnSetFANDutyAuto(2);
-	*/
-	//
 	TRACE0("内核初始化成功。\n");
 	m_nInit = 1;
 	return TRUE;
@@ -371,19 +406,97 @@ void CCore::Uninit()
 	}
 	m_nInit = 0;
 }
+
+// 定时器回调函数（静态函数）
+void CALLBACK CCore::TimerCallback(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2)
+{
+	CCore* pCore = (CCore*)dwUser;
+	if (pCore && !pCore->m_nExit)
+	{
+		// 设置强制刷新标志，让主循环执行Work()
+		pCore->m_bForcedRefresh = TRUE;
+	}
+}
+
 void CCore::Run()
 {
-	static int nNextChecktTime = 0;
-	static BOOL bSetPriority = FALSE;
 	m_config.LoadConfig();
-	//m_nInit = 2;
-	//Sleep(3000);
+
 	if (!m_nInit)
 		Init();
 
 	if (m_nInit == 1)
 	{
-		TRACE0("内核开始运行。\n");
+		TRACE0("内核开始运行（多媒体定时器模式）。\n");
+
+		// 获取定时器能力
+		TIMECAPS tc;
+		if (timeGetDevCaps(&tc, sizeof(TIMECAPS)) == TIMERR_NOERROR)
+		{
+			// 计算定时器间隔（毫秒）
+			UINT nInterval = m_config.UpdateInterval * 1000;
+			nInterval = max(nInterval, tc.wPeriodMin);
+			nInterval = min(nInterval, tc.wPeriodMax);
+
+			// 创建多媒体定时器
+			m_nTimerID = timeSetEvent(
+				nInterval,                    // 延时（毫秒）
+				tc.wPeriodMin,                // 分辨率
+				TimerCallback,                // 回调函数
+				(DWORD_PTR)this,              // 用户数据
+				TIME_PERIODIC | TIME_CALLBACK_FUNCTION);  // 周期性触发
+
+			if (m_nTimerID)
+			{
+				TRACE0("多媒体定时器创建成功。\n");
+
+				while (!m_nExit)
+				{
+					if (m_bForcedRefresh)
+					{
+						Work();
+						m_nLastUpdateTime = GetTime();
+						m_bForcedRefresh = FALSE;
+					}
+					else if (m_config.SoftControl && m_config.TakeOver && !m_bForcedCooling)
+					{
+						// 软性控制每100ms执行一次
+						SoftControlDuty();
+					}
+
+					Sleep(500);
+				}
+
+				// 清理定时器
+				timeKillEvent(m_nTimerID);
+				m_nTimerID = 0;
+				TRACE0("内核结束运行。\n");
+			}
+			else
+			{
+				TRACE0("多媒体定时器创建失败，回退到原始模式。\n");
+				m_nInit = 1;
+				RunOriginal();
+			}
+		}
+		else
+		{
+			TRACE0("无法获取定时器能力，回退到原始模式。\n");
+			m_nInit = 1;
+			RunOriginal();
+		}
+	}
+	m_nExit = 2;
+}
+
+void CCore::RunOriginal()
+{
+	static int nNextChecktTime = 0;
+	static BOOL bSetPriority = FALSE;
+
+	if (m_nInit == 1)
+	{
+		TRACE0("内核开始运行（原始模式）。\n");
 		int curtime;
 		while (!m_nExit)
 		{
@@ -401,12 +514,18 @@ void CCore::Run()
 					SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);//在首次更新成功后才设置高优先级
 				}
 			}
+			else if (m_config.SoftControl && m_config.TakeOver && !m_bForcedCooling)
+			{
+				// 软性控制：每0.1秒调整1%
+				SoftControlDuty();
+			}
 			Sleep(100);
 		}
 		TRACE0("内核结束运行。\n");
 	}
 	m_nExit = 2;
 }
+
 void CCore::Work()
 {
 	Update();
@@ -414,12 +533,18 @@ void CCore::Work()
 	{
 		if (m_nCurTemp[0] >= m_config.ForceTemp || m_nCurTemp[1] >= m_config.ForceTemp)
 		{
-			if (m_nSetDuty[0] < 95 || m_nSetDuty[1] < 95)
+			if (m_nSetDuty[0] < 100 || m_nSetDuty[1] < 100)
 			{
-				m_nSetDuty[0] = 95;
+				m_nSetDuty[0] = 100;
 				m_nSetDutyLevel[0] = 10;
-				m_nSetDuty[1] = 95;
+				m_nSetDuty[1] = 100;
 				m_nSetDutyLevel[1] = 10;
+				// 强制冷却直接设置，不经过软性控制
+				for (int i = 0; i < 2; i++)
+				{
+					m_nSoftTargetDuty[i] = m_nSetDuty[i];
+					m_nSoftCurrentDuty[i] = m_nSetDuty[i];
+				}
 				SetFanDuty();
 			}
 			return;
@@ -439,6 +564,20 @@ void CCore::Work()
 		m_GpuInfo.LockFrequency(m_config.GPUFrequency);
 	else
 		m_GpuInfo.LockFrequency(0);
+
+	//设置显存频率偏移
+	if (m_config.LockMemOverclock)
+	{
+		if (!m_GpuInfo.SetMemOverclockOffset(m_config.MemOverclockOffset))
+		{
+			// 设置失败，自动停止显存偏移功能，归零并保存
+			m_config.LockMemOverclock = FALSE;
+			m_config.MemOverclockOffset = 0;
+			m_config.SaveConfig();
+		}
+	}
+	else
+		m_GpuInfo.SetMemOverclockOffset(0);
 }
 void CCore::Update()
 {
@@ -446,7 +585,7 @@ void CCore::Update()
 	int TempErr = 0;
 	for (int i = 0; i < 2; i++)
 	{
-		data = m_pfnGetTempFanDuty(i+1);
+		data = m_pfnGetTempFanDuty(i + 1);
 		if (abs(data.Remote - this->m_nCurTemp[i]) > 30)
 		{
 			//AfxMessageBox("获取温度有误");
@@ -455,7 +594,7 @@ void CCore::Update()
 			{
 				Sleep(1000);
 				i--;
-				continue;//重试一次
+				continue;//重试
 			}
 		}
 		this->m_nLastTemp[i] = this->m_nCurTemp[i];
@@ -486,14 +625,26 @@ void CCore::Control()
 	else
 		CalcStdDuty();
 	//设定转速
-	SetFanDuty();
-
+	if (m_config.SoftControl)
+	{
+		// 软性控制：设置目标值，由SoftControlDuty()逐步接近
+		for (int i = 0; i < 2; i++)
+		{
+			m_nSoftTargetDuty[i] = m_nSetDuty[i];
+			if (m_nSoftCurrentDuty[i] <= 0)
+				m_nSoftCurrentDuty[i] = m_nCurDuty[i];
+		}
+	}
+	else
+	{
+		SetFanDuty();
+	}
 }
 void CCore::CalcLinearDuty()
 {
 	static int nLastTemp[2] = { 0, 0 };//每次用于计算转速的温度
 
-	int duty,dl;
+	int duty, dl;
 	int j;
 	for (int i = 0; i < 2; i++)
 	{
@@ -502,12 +653,12 @@ void CCore::CalcLinearDuty()
 
 		j = nLastTemp[i];//计算转速使用的温度
 
-		if (j < 45)
+		if (j < m_config.TempThresholds[9])
 		{
 			duty = m_config.DutyList[i][9];
 			dl = 0;
 		}
-		else if (j >= 90)
+		else if (j >= m_config.TempThresholds[0])
 		{
 			duty = m_config.DutyList[i][0];
 			dl = 10;
@@ -515,27 +666,27 @@ void CCore::CalcLinearDuty()
 		else
 		{
 			int idx = 0;
-			if (j < 50)
+			if (j < m_config.TempThresholds[8])
 				idx = 8;
-			else if (j < 55)
+			else if (j < m_config.TempThresholds[7])
 				idx = 7;
-			else if (j < 60)
+			else if (j < m_config.TempThresholds[6])
 				idx = 6;
-			else if (j < 65)
+			else if (j < m_config.TempThresholds[5])
 				idx = 5;
-			else if (j < 70)
+			else if (j < m_config.TempThresholds[4])
 				idx = 4;
-			else if (j < 75)
+			else if (j < m_config.TempThresholds[3])
 				idx = 3;
-			else if (j < 80)
+			else if (j < m_config.TempThresholds[2])
 				idx = 2;
-			else if (j < 85)
+			else if (j < m_config.TempThresholds[1])
 				idx = 1;
-			else// if (j < 90)
+			else// if (j < TempThresholds[0])
 				idx = 0;
 
-			int temp_l = TEMP_LIST[idx + 1];
-			int temp_h = TEMP_LIST[idx];
+			int temp_l = m_config.TempThresholds[idx + 1];
+			int temp_h = m_config.TempThresholds[idx];
 			int duty_l = m_config.DutyList[i][idx + 1];
 			int duty_h = m_config.DutyList[i][idx];
 			duty = int((duty_h - duty_l) / double(temp_h - temp_l) * (j - temp_l) + 0.5) + duty_l;
@@ -549,7 +700,7 @@ void CCore::CalcStdDuty()
 {
 	int dl;
 	int last_dl;
-	int j,k;
+	int j, k;
 	for (int i = 0; i < 2; i++)
 	{
 		j = m_nCurTemp[i];
@@ -557,11 +708,11 @@ void CCore::CalcStdDuty()
 		for (k = 0; k < 10; k++)
 		{
 			dl = 10 - k;
-			if (j >= TEMP_LIST[k])
+			if (j >= m_config.TempThresholds[k])
 			{
 				break;
 			}
-			else if (j < TEMP_LIST[k] - m_config.TransitionTemp)
+			else if (j < m_config.TempThresholds[k] - m_config.TransitionTemp)
 			{
 				continue;
 			}
@@ -588,6 +739,10 @@ void CCore::ResetFan()
 		m_nSetDutyLevel[0] = 0;
 		m_nSetDuty[1] = 0;
 		m_nSetDutyLevel[1] = 0;
+		m_nSoftTargetDuty[0] = 0;
+		m_nSoftTargetDuty[1] = 0;
+		m_nSoftCurrentDuty[0] = 0;
+		m_nSoftCurrentDuty[1] = 0;
 		m_pfnSetFANDutyAuto(1);
 		m_pfnSetFANDutyAuto(2);
 		m_pfnSetFANDutyAuto(3);
@@ -607,4 +762,24 @@ void CCore::SetFanDuty()
 			m_pfnSetFanDuty(i + 2, duty);//如果存在第3个风扇
 	}
 	m_bTakeOverStatus = TRUE;
+}
+
+void CCore::SoftControlDuty()
+{
+	BOOL bChanged = FALSE;
+	for (int i = 0; i < 2; i++)
+	{
+		if (m_nSoftCurrentDuty[i] != m_nSoftTargetDuty[i])
+		{
+			bChanged = TRUE;
+			if (m_nSoftCurrentDuty[i] < m_nSoftTargetDuty[i])
+				m_nSoftCurrentDuty[i]++;
+			else
+				m_nSoftCurrentDuty[i]--;
+
+			m_nSetDuty[i] = m_nSoftCurrentDuty[i];
+		}
+	}
+	if (bChanged)
+		SetFanDuty();
 }

@@ -1,4 +1,3 @@
-
 // MyFanControlDlg.h : 头文件
 //
 
@@ -14,19 +13,19 @@
 // CMyFanControlDlg 对话框
 class CMyFanControlDlg : public CDialogEx
 {
-// 构造
+	// 构造
 public:
 	CMyFanControlDlg(CWnd* pParent = NULL);	// 标准构造函数
 	~CMyFanControlDlg();
 
-// 对话框数据
+	// 对话框数据
 	enum { IDD = IDD_MYFANCONTROL_DIALOG };
 
-	protected:
+protected:
 	virtual void DoDataExchange(CDataExchange* pDX);	// DDX/DDV 支持
 
 
-// 实现
+	// 实现
 protected:
 	HICON m_hIcon;
 
@@ -45,13 +44,16 @@ public:
 	CButton m_ctlTakeOver;
 	CButton m_ctlForcedCooling;
 	CButton m_ctlLinear;
+	CButton m_ctlSoftControl;// 软性控制开关
 	CEdit m_ctlInterval;
 	CEdit m_ctlTransition;
 	CEdit m_ctlForceTemp;//强制冷却至温度
 	int m_nDutyEditCtlID[2][10];//转速设置控件的id
+	int m_nTempThresholdCtlID[10];//温度档位控件的id
 	BOOL m_bWindowVisible;//窗口是否显示
 	int m_nWindowSize[2];//完整窗口尺寸
 	BOOL m_bAdvancedMode;//高级模式
+	BOOL m_bTrayAdded;//托盘图标是否已添加
 
 public:
 	static DWORD WINAPI CoreThread(LPVOID lParam);
@@ -69,6 +71,7 @@ public:
 	afx_msg void OnBnClickedCheckTakeover();
 	afx_msg void OnBnClickedCheckForce();
 	afx_msg void OnBnClickedCheckLinear();
+	afx_msg void OnBnClickedCheckSoftControl();//软性控制复选框
 	void SetAdvancedMode(BOOL bAdvanced);//设置高级模式
 	afx_msg void OnBnClickedButtonAdvanced();
 	CButton m_ctlAutorun;
@@ -81,4 +84,8 @@ public:
 	BOOL CheckInputFrequency(int frequency);//检查输入的频率是否合适
 	CEdit m_ctlFrequency;
 	CButton m_ctlLockGpuFrequancy;
+	CButton m_ctlLockMemOverclock;  // 显存偏移锁定复选框
+	CEdit m_ctlMemOffset;//显存偏移编辑框
+	afx_msg void OnBnClickedCheckLockMemOverclock();  // 显存偏移复选框事件
+	afx_msg LRESULT OnTaskbarCreated(WPARAM wParam, LPARAM lParam);//explorer重启事件
 };

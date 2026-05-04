@@ -1,4 +1,3 @@
-
 // MyFanControlDlg.cpp : 实现文件
 //
 
@@ -6,6 +5,7 @@
 #include "MyFanControl.h"
 #include "MyFanControlDlg.h"
 #include "afxdialogex.h"
+static UINT WM_TASKBARCREATED = ::RegisterWindowMessage(_T("TaskbarCreated"));
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -15,6 +15,7 @@
 #define IDR_SHOW 11
 #define IDR_EXIT 12
 
+
 __int64 CompareFileTime(FILETIME time1, FILETIME time2)
 {
 	__int64 a = __int64(time1.dwHighDateTime) << 32 | time1.dwLowDateTime;
@@ -22,7 +23,7 @@ __int64 CompareFileTime(FILETIME time1, FILETIME time2)
 
 	return (b - a);
 }
-int GetCpuClock(int *CPU_usage)
+int GetCpuClock(int* CPU_usage)
 {
 	LARGE_INTEGER c1;
 	QueryPerformanceCounter(&c1);
@@ -57,27 +58,26 @@ int GetCpuClock(int *CPU_usage)
 }
 ////
 
-// 用于应用程序“关于”菜单项的 CAboutDlg 对话框
+// 用于应用程序"关于"菜单项的 CAboutDlg 对话框
 
 class CAboutDlg : public CDialogEx
 {
 public:
 	CAboutDlg();
 
-// 对话框数据
+	// 对话框数据
 	enum { IDD = IDD_ABOUTBOX };
 
-	protected:
+protected:
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV 支持
 
-// 实现
+	// 实现
 protected:
 	DECLARE_MESSAGE_MAP()
 };
 
 CAboutDlg::CAboutDlg() : CDialogEx(CAboutDlg::IDD)
-{
-}
+{}
 
 void CAboutDlg::DoDataExchange(CDataExchange* pDX)
 {
@@ -103,7 +103,8 @@ CMyFanControlDlg::CMyFanControlDlg(CWnd* pParent /*=NULL*/)
 	m_hCoreThread = NULL;
 	m_nLastCoreUpdateTime = -1;
 	m_bWindowVisible = FALSE;
-	m_bAdvancedMode = TRUE;
+	m_bAdvancedMode = FALSE; // 默认高级模式
+	m_bTrayAdded = FALSE;
 	m_nWindowSize[0] = 0;
 	m_nWindowSize[1] = 0;
 
@@ -127,6 +128,18 @@ CMyFanControlDlg::CMyFanControlDlg(CWnd* pParent /*=NULL*/)
 	m_nDutyEditCtlID[1][7] = IDC_EDIT_GPU7;
 	m_nDutyEditCtlID[1][8] = IDC_EDIT_GPU8;
 	m_nDutyEditCtlID[1][9] = IDC_EDIT_GPU9;
+
+	// 温度档位控件ID
+	m_nTempThresholdCtlID[0] = IDC_EDIT_TEMP0;
+	m_nTempThresholdCtlID[1] = IDC_EDIT_TEMP1;
+	m_nTempThresholdCtlID[2] = IDC_EDIT_TEMP2;
+	m_nTempThresholdCtlID[3] = IDC_EDIT_TEMP3;
+	m_nTempThresholdCtlID[4] = IDC_EDIT_TEMP4;
+	m_nTempThresholdCtlID[5] = IDC_EDIT_TEMP5;
+	m_nTempThresholdCtlID[6] = IDC_EDIT_TEMP6;
+	m_nTempThresholdCtlID[7] = IDC_EDIT_TEMP7;
+	m_nTempThresholdCtlID[8] = IDC_EDIT_TEMP8;
+	m_nTempThresholdCtlID[9] = IDC_EDIT_TEMP9;
 }
 
 CMyFanControlDlg::~CMyFanControlDlg()
@@ -141,12 +154,15 @@ void CMyFanControlDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_CHECK_TAKEOVER, m_ctlTakeOver);
 	DDX_Control(pDX, IDC_CHECK_FORCE, m_ctlForcedCooling);
 	DDX_Control(pDX, IDC_CHECK_LINEAR, m_ctlLinear);
+	DDX_Control(pDX, IDC_CHECK_SOFTCONTROL, m_ctlSoftControl);
 	DDX_Control(pDX, IDC_EDIT_INTERVAL, m_ctlInterval);
 	DDX_Control(pDX, IDC_EDIT_TREANSITION, m_ctlTransition);
 	DDX_Control(pDX, IDC_EDIT_FORCE_TEMP, m_ctlForceTemp);
 	DDX_Control(pDX, IDC_CHECK_AUTORUN, m_ctlAutorun);
 	DDX_Control(pDX, IDC_EDIT_GPU_FREQUENCY, m_ctlFrequency);
 	DDX_Control(pDX, IDC_CHECK_LOCK_GPU_FREQUANCY, m_ctlLockGpuFrequancy);
+	DDX_Control(pDX, IDC_CHECK_LOCK_MEM_OVERCLOCK, m_ctlLockMemOverclock);
+	DDX_Control(pDX, IDC_EDIT_MEM_OFFSET, m_ctlMemOffset);
 }
 
 BEGIN_MESSAGE_MAP(CMyFanControlDlg, CDialogEx)
@@ -158,25 +174,30 @@ BEGIN_MESSAGE_MAP(CMyFanControlDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_BUTTON_SAVE, &CMyFanControlDlg::OnBnClickedButtonSave)
 	ON_BN_CLICKED(IDC_BUTTON_RESET, &CMyFanControlDlg::OnBnClickedButtonReset)
 	ON_BN_CLICKED(IDC_BUTTON_LOAD, &CMyFanControlDlg::OnBnClickedButtonLoad)
-	ON_MESSAGE(WM_SHOWTASK, &CMyFanControlDlg::OnShowTask)//消息映射
+	ON_MESSAGE(WM_SHOWTASK, &CMyFanControlDlg::OnShowTask)
 	ON_BN_CLICKED(IDC_CHECK_TAKEOVER, &CMyFanControlDlg::OnBnClickedCheckTakeover)
 	ON_BN_CLICKED(IDC_CHECK_FORCE, &CMyFanControlDlg::OnBnClickedCheckForce)
 	ON_BN_CLICKED(IDC_CHECK_LINEAR, &CMyFanControlDlg::OnBnClickedCheckLinear)
+	ON_BN_CLICKED(IDC_CHECK_SOFTCONTROL, &CMyFanControlDlg::OnBnClickedCheckSoftControl)
 	ON_BN_CLICKED(IDC_BUTTON_ADVANCED, &CMyFanControlDlg::OnBnClickedButtonAdvanced)
 	ON_BN_CLICKED(IDC_CHECK_AUTORUN, &CMyFanControlDlg::OnBnClickedCheckAutorun)
 	ON_BN_CLICKED(IDC_CHECK_LOCK_GPU_FREQUANCY, &CMyFanControlDlg::OnBnClickedCheckLockGpuFrequancy)
+	ON_BN_CLICKED(IDC_CHECK_LOCK_MEM_OVERCLOCK, &CMyFanControlDlg::OnBnClickedCheckLockMemOverclock)
+	ON_REGISTERED_MESSAGE(WM_TASKBARCREATED, &CMyFanControlDlg::OnTaskbarCreated)
 END_MESSAGE_MAP()
 
+LRESULT CMyFanControlDlg::OnTaskbarCreated(WPARAM wParam, LPARAM lParam)
+{
+	m_bTrayAdded = FALSE;
+	SetTray("蓝天风扇监控");
+	return 0;
+}
 
-// CMyFanControlDlg 消息处理程序
 
 BOOL CMyFanControlDlg::OnInitDialog()
 {
 	CDialogEx::OnInitDialog();
 
-	// 将“关于...”菜单项添加到系统菜单中。
-
-	// IDM_ABOUTBOX 必须在系统命令范围内。
 	ASSERT((IDM_ABOUTBOX & 0xFFF0) == IDM_ABOUTBOX);
 	ASSERT(IDM_ABOUTBOX < 0xF000);
 
@@ -194,32 +215,31 @@ BOOL CMyFanControlDlg::OnInitDialog()
 		}
 	}
 
-	// 设置此对话框的图标。  当应用程序主窗口不是对话框时，框架将自动
-	//  执行此操作
-	SetIcon(m_hIcon, TRUE);			// 设置大图标
-	SetIcon(m_hIcon, FALSE);		// 设置小图标
+	SetIcon(m_hIcon, TRUE);
+	SetIcon(m_hIcon, FALSE);
 
-	// TODO:  在此添加额外的初始化代码
-	//获取窗口完整尺寸
 	CRect rect;
 	this->GetWindowRect(rect);
 	m_nWindowSize[0] = rect.Width();
 	m_nWindowSize[1] = rect.Height();
-	SetAdvancedMode(FALSE);
+	SetAdvancedMode(TRUE);
 
 	SetTray("蓝天风扇监控");
-
-
 
 	if (m_hCoreThread == NULL)
 	{
 		DWORD dwThreadID = 0;
-		m_hCoreThread = CreateThread(NULL, NULL, CoreThread, this, NULL, &dwThreadID);
+		m_hCoreThread = CreateThread(NULL, NULL, CoreThread, this, CREATE_SUSPENDED, &dwThreadID);
+		if (m_hCoreThread)
+		{
+			SetThreadPriority(m_hCoreThread, THREAD_PRIORITY_TIME_CRITICAL);
+			ResumeThread(m_hCoreThread);
+		}
 	}
 	SetTimer(0, 100, NULL);
 	m_ctlAutorun.SetCheck(SetAutorunReg(FALSE) || SetAutorunTask(FALSE));
 
-	return TRUE;  // 除非将焦点设置到控件，否则返回 TRUE
+	return TRUE;
 }
 
 void CMyFanControlDlg::OnSysCommand(UINT nID, LPARAM lParam)
@@ -235,19 +255,13 @@ void CMyFanControlDlg::OnSysCommand(UINT nID, LPARAM lParam)
 	}
 }
 
-// 如果向对话框添加最小化按钮，则需要下面的代码
-//  来绘制该图标。  对于使用文档/视图模型的 MFC 应用程序，
-//  这将由框架自动完成。
-
 void CMyFanControlDlg::OnPaint()
 {
 	if (IsIconic())
 	{
-		CPaintDC dc(this); // 用于绘制的设备上下文
-
+		CPaintDC dc(this);
 		SendMessage(WM_ICONERASEBKGND, reinterpret_cast<WPARAM>(dc.GetSafeHdc()), 0);
 
-		// 使图标在工作区矩形中居中
 		int cxIcon = GetSystemMetrics(SM_CXICON);
 		int cyIcon = GetSystemMetrics(SM_CYICON);
 		CRect rect;
@@ -255,7 +269,6 @@ void CMyFanControlDlg::OnPaint()
 		int x = (rect.Width() - cxIcon + 1) / 2;
 		int y = (rect.Height() - cyIcon + 1) / 2;
 
-		// 绘制图标
 		dc.DrawIcon(x, y, m_hIcon);
 	}
 	else
@@ -264,8 +277,6 @@ void CMyFanControlDlg::OnPaint()
 	}
 }
 
-//当用户拖动最小化窗口时系统调用此函数取得光标
-//显示。
 HCURSOR CMyFanControlDlg::OnQueryDragIcon()
 {
 	return static_cast<HCURSOR>(m_hIcon);
@@ -273,10 +284,8 @@ HCURSOR CMyFanControlDlg::OnQueryDragIcon()
 
 DWORD CMyFanControlDlg::CoreThread(LPVOID lParam)
 {
-
-	CMyFanControlDlg * pDlg = (CMyFanControlDlg *)lParam;
+	CMyFanControlDlg* pDlg = (CMyFanControlDlg*)lParam;
 	pDlg->m_core.Run();
-
 	return 0;
 }
 
@@ -286,24 +295,18 @@ void CMyFanControlDlg::OnWindowPosChanging(WINDOWPOS* lpwndpos)
 	{
 		lpwndpos->flags &= ~SWP_SHOWWINDOW;
 	}
-
-
 	CDialogEx::OnWindowPosChanging(lpwndpos);
-
-	// TODO:  在此处添加消息处理程序代码
 }
-
 
 void CMyFanControlDlg::OnOK()
 {
-	// TODO:  在此添加专用代码和/或调用基类
 	if (!m_core.m_nExit)
 		m_core.m_nExit = 1;
 
-	if (m_core.m_nExit == 1)//等待内核线程结束
+	if (m_core.m_nExit == 1)
 	{
 		int count = 0;
-		while (m_core.m_nExit == 1 && count++<100)
+		while (m_core.m_nExit == 1 && count++ < 100)
 		{
 			Sleep(100);
 		}
@@ -316,10 +319,8 @@ void CMyFanControlDlg::OnOK()
 	}
 }
 
-
 void CMyFanControlDlg::OnCancel()
 {
-	// TODO:  在此添加专用代码和/或调用基类
 	if (m_bWindowVisible)
 	{
 		this->ShowWindow(SW_HIDE);
@@ -329,27 +330,23 @@ void CMyFanControlDlg::OnCancel()
 		this->ShowWindow(SW_SHOW);
 		SetForegroundWindow();
 	}
-	//CDialogEx::OnCancel();
 }
-
 
 void CMyFanControlDlg::OnTimer(UINT_PTR nIDEvent)
 {
-	// TODO:  在此添加消息处理程序代码和/或调用默认值
-	static int nCheckThreadCount = 0;//检查工作线程状态计数器，每100ms+1
+	static int nCheckThreadCount = 0;
 	CDialogEx::OnTimer(nIDEvent);
 	if (m_core.m_nExit == 2)
 	{
 		OnOK();
 	}
 
-	//检查工作线程是否卡死
 	nCheckThreadCount++;
-	if (nCheckThreadCount > 150)//内核已经15秒未完成一个循环，认为卡死，结束程序
+	if (nCheckThreadCount > 150)
 	{
 		KillTimer(0);
 		m_core.m_nExit = 2;
-		TerminateThread(m_hCoreThread, -1);//强制结束进程
+		TerminateThread(m_hCoreThread, -1);
 		CloseHandle(m_hCoreThread);
 		m_hCoreThread = NULL;
 		MessageBox("检测到工作线程卡死，程序将立刻结束，如果重试后问题仍然存在，说明本程序可能不适用于此电脑。");
@@ -359,22 +356,19 @@ void CMyFanControlDlg::OnTimer(UINT_PTR nIDEvent)
 	if (m_core.m_nInit != 1)
 		return;
 
-
-	//根据窗口显示状态来刷新
 	static BOOL LastVisible = FALSE;
 	m_bWindowVisible = IsWindowVisible();
 	if (m_bWindowVisible && !LastVisible)
 	{
-		m_core.m_bUpdateRPM = TRUE;//更新风扇转速
+		m_core.m_bUpdateRPM = TRUE;
 		UpdateGui(TRUE);
 	}
 	else if (!m_bWindowVisible && LastVisible)
 	{
 		m_core.m_bUpdateRPM = FALSE;
-		//AfxMessageBox("窗口已隐藏");
 	}
 	LastVisible = m_bWindowVisible;
-	// 内核已经更新数据，需要更新界面
+
 	if (m_nLastCoreUpdateTime != m_core.m_nLastUpdateTime)
 	{
 		if (m_bWindowVisible)
@@ -382,28 +376,24 @@ void CMyFanControlDlg::OnTimer(UINT_PTR nIDEvent)
 		nCheckThreadCount = 0;
 		m_nLastCoreUpdateTime = m_core.m_nLastUpdateTime;
 	}
-	//
 }
 
 void CMyFanControlDlg::UpdateGui(BOOL bFull)
 {
 	int row = m_ctlStatus.GetItemCount();
 	int col = m_ctlStatus.GetHeaderCtrl()->GetItemCount();
-	if (row != 6 || col != 3)
+	if (row != 7 || col != 3)
 	{
 		if (!bFull)
 		{
-			UpdateGui(TRUE);//需要完整更新界面
+			UpdateGui(TRUE);
 			return;
 		}
-		//得到控件大小
 		CRect rect;
-		
 		m_ctlStatus.GetWindowRect(rect);
 		int width = rect.Width();
-		//设置行列数
-		m_ctlStatus.DeleteAllItems();//删除所有单元格
-		while (m_ctlStatus.DeleteColumn(0));//删除所有列
+		m_ctlStatus.DeleteAllItems();
+		while (m_ctlStatus.DeleteColumn(0));
 		int i = 0;
 		m_ctlStatus.InsertColumn(i++, "", LVCFMT_CENTER, int(width * 0.32));
 		m_ctlStatus.InsertColumn(i++, "CPU", LVCFMT_CENTER, int(width * 0.33));
@@ -411,13 +401,12 @@ void CMyFanControlDlg::UpdateGui(BOOL bFull)
 		i = 0;
 		m_ctlStatus.InsertItem(i++, "当前温度");
 		m_ctlStatus.InsertItem(i++, "设定挡位");
-		m_ctlStatus.InsertItem(i++, "转速%");
-		//m_ctlStatus.InsertItem(i++, "设定负载");
+		m_ctlStatus.InsertItem(i++, "当前转速%");
 		m_ctlStatus.InsertItem(i++, "转速RPM");
+		m_ctlStatus.InsertItem(i++, "目标转速%");
 		m_ctlStatus.InsertItem(i++, "运行频率");
 		m_ctlStatus.InsertItem(i++, "使用率%");
 	}
-	//显示状态信息
 	char str[256];
 	for (int i = 0; i < 2; i++)
 	{
@@ -427,9 +416,9 @@ void CMyFanControlDlg::UpdateGui(BOOL bFull)
 		m_ctlStatus.SetItemText(1, i + 1, str);
 		sprintf_s(str, 256, "%d", m_core.m_nCurDuty[i]);
 		m_ctlStatus.SetItemText(2, i + 1, str);
-		//sprintf_s(str, 256, "%d", m_core.m_nSetDuty[i]);
-		//m_ctlStatus.SetItemText(3, i + 1, str);
-		if (m_core.m_nCurRPM[i]>=0)
+		sprintf_s(str, 256, "%d", m_core.m_nSoftTargetDuty[i]);
+		m_ctlStatus.SetItemText(4, i + 1, str);
+		if (m_core.m_nCurRPM[i] >= 0)
 		{
 			sprintf_s(str, 256, "%d", m_core.m_nCurRPM[i]);
 			m_ctlStatus.SetItemText(3, i + 1, str);
@@ -441,69 +430,53 @@ void CMyFanControlDlg::UpdateGui(BOOL bFull)
 		if (i == 1)
 		{
 			sprintf_s(str, 256, "%d/%d", m_core.m_GpuInfo.m_nGraphicsClock, m_core.m_GpuInfo.m_nMemoryClock);
-			m_ctlStatus.SetItemText(4, i + 1, str);
+			m_ctlStatus.SetItemText(5, i + 1, str);
 			sprintf_s(str, 256, "%d", m_core.m_GpuInfo.m_nUsage);
-			m_ctlStatus.SetItemText(5, i + 1, str);
+			m_ctlStatus.SetItemText(6, i + 1, str);
 		}
-		/*
-		else if (i == 0)
-		{
-			int cpu_usage;
-			int CpuClock = GetCpuClock(&cpu_usage);
-			sprintf_s(str, 256, "%d", CpuClock);
-			m_ctlStatus.SetItemText(4, i + 1, str);
-			sprintf_s(str, 256, "%d", cpu_usage);
-			m_ctlStatus.SetItemText(5, i + 1, str);
-		}*/
-
 	}
-	//强制冷却状态
 	int fc = m_ctlForcedCooling.GetCheck();
 	if (fc ^ m_core.m_bForcedCooling)
 	{
 		m_ctlForcedCooling.SetCheck(m_core.m_bForcedCooling);
 	}
-	//////////////////////////////////////////////////////////
 	if (!bFull)
 		return;
-	//接管控制
 	int to = m_ctlTakeOver.GetCheck();
 	if (to ^ m_core.m_config.TakeOver)
-	{
 		m_ctlTakeOver.SetCheck(m_core.m_config.TakeOver);
-	}
-	//线性控制
 	int lc = m_ctlLinear.GetCheck();
 	if (lc ^ m_core.m_config.Linear)
-	{
 		m_ctlLinear.SetCheck(m_core.m_config.Linear);
-	}
-	//GPU限频
+	int sc = m_ctlSoftControl.GetCheck();
+	if (sc ^ m_core.m_config.SoftControl)
+		m_ctlSoftControl.SetCheck(m_core.m_config.SoftControl);
 	int lf = m_ctlLockGpuFrequancy.GetCheck();
 	if (lf ^ m_core.m_config.LockGPUFrequency)
-	{
 		m_ctlLockGpuFrequancy.SetCheck(m_core.m_config.LockGPUFrequency);
-	}
-	//更新间隔
+	int lmo = m_ctlLockMemOverclock.GetCheck();
+	if (lmo ^ m_core.m_config.LockMemOverclock)
+		m_ctlLockMemOverclock.SetCheck(m_core.m_config.LockMemOverclock);
 	sprintf_s(str, 256, "%d", m_core.m_config.UpdateInterval);
 	m_ctlInterval.SetWindowTextA(str);
-	//过渡温度
 	sprintf_s(str, 256, "%d", m_core.m_config.TransitionTemp);
 	m_ctlTransition.SetWindowTextA(str);
-	//强制冷却温度
 	sprintf_s(str, 256, "%d", m_core.m_config.ForceTemp);
 	m_ctlForceTemp.SetWindowTextA(str);
-	//GPU频率
 	sprintf_s(str, 256, "%d", m_core.m_config.GPUFrequency);
 	m_ctlFrequency.SetWindowTextA(str);
-	//自定义转速控制
+	sprintf_s(str, 256, "%d", m_core.m_config.MemOverclockOffset);
+	m_ctlMemOffset.SetWindowTextA(str);
 	for (int i = 0; i < 2; i++)
-	{
 		for (int j = 0; j < 10; j++)
 		{
 			sprintf_s(str, 256, "%d", m_core.m_config.DutyList[i][j]);
 			GetDlgItem(m_nDutyEditCtlID[i][j])->SetWindowTextA(str);
 		}
+	for (int j = 0; j < 10; j++)
+	{
+		sprintf_s(str, 256, "%d", m_core.m_config.TempThresholds[j]);
+		GetDlgItem(m_nTempThresholdCtlID[j])->SetWindowTextA(str);
 	}
 }
 
@@ -511,7 +484,7 @@ BOOL CMyFanControlDlg::CheckAndSave()
 {
 	//检查设置
 	char str[256];
-	m_ctlInterval.GetWindowTextA(str,256);
+	m_ctlInterval.GetWindowTextA(str, 256);
 	int nInterval = atoi(str);
 	if (nInterval < 1 || nInterval > 5)
 	{
@@ -529,9 +502,9 @@ BOOL CMyFanControlDlg::CheckAndSave()
 	//
 	m_ctlForceTemp.GetWindowTextA(str, 256);
 	int nForceTemp = atoi(str);
-	if (nForceTemp < 40 || nForceTemp > 90)
+	if (nForceTemp < 0 || nForceTemp > 90)
 	{
-		AfxMessageBox("强制冷却温度必须为40-90");
+		AfxMessageBox("强制冷却温度必须为0-90");
 		return FALSE;
 	}
 	//
@@ -542,6 +515,33 @@ BOOL CMyFanControlDlg::CheckAndSave()
 
 	if (nFrequency == 0)
 		nFrequency = m_core.m_GpuInfo.m_nStandardFrequency;
+
+	// 显存偏移
+	m_ctlMemOffset.GetWindowTextA(str, 256);
+	int nMemOffset = atoi(str);
+
+	// 获取显存偏移锁定状态
+	BOOL bLockMemOverclock = m_ctlLockMemOverclock.GetCheck();
+
+	if (bLockMemOverclock)
+	{
+		if (nMemOffset < m_core.m_GpuInfo.m_nMemoryRangeMin || nMemOffset > m_core.m_GpuInfo.m_nMemoryRangeMax)
+		{
+			char str2[256];
+			sprintf_s(str2, 256, "显存频率偏移必须为%d-%d", m_core.m_GpuInfo.m_nMemoryRangeMin, m_core.m_GpuInfo.m_nMemoryRangeMax);
+			AfxMessageBox(str2);
+			return FALSE;
+		}
+		// 安全警告
+		if (nMemOffset > 0)
+		{
+			char str2[256];
+			sprintf_s(str2, 256, "显存频率偏移为%dMHz，超频可能降低系统稳定性。\n是否确认要设置？", nMemOffset);
+			int rv = MessageBox(str2, "确认设置", MB_YESNO);
+			if (IDNO == rv)
+				return FALSE;
+		}
+	}
 	//
 	int nDutyList[2][10];
 	for (int i = 0; i < 2; i++)
@@ -550,13 +550,36 @@ BOOL CMyFanControlDlg::CheckAndSave()
 		{
 			GetDlgItem(m_nDutyEditCtlID[i][j])->GetWindowTextA(str, 256);
 			nDutyList[i][j] = atoi(str);
-			if (nDutyList[i][j]<0 || nDutyList[i][j]>100)
+			if (nDutyList[i][j] < 0 || nDutyList[i][j]>100)
 			{
 				char str2[256];
-				sprintf_s(str2, 256, "%s风扇转速设定错误，必须为0-100",i?"GPU":"CPU");
+				sprintf_s(str2, 256, "%s风扇转速设定错误，必须为0-100", i ? "GPU" : "CPU");
 				AfxMessageBox(str2);
 				return FALSE;
 			}
+		}
+	}
+	// 温度档位
+	int nTempThresholds[10];
+	for (int j = 0; j < 10; j++)
+	{
+		GetDlgItem(m_nTempThresholdCtlID[j])->GetWindowTextA(str, 256);
+		nTempThresholds[j] = atoi(str);
+		if (nTempThresholds[j] < 30 || nTempThresholds[j] > 100)
+		{
+			char str2[256];
+			sprintf_s(str2, 256, "温度档位%d设定错误，必须为30-100", j + 1);
+			AfxMessageBox(str2);
+			return FALSE;
+		}
+	}
+	// 检查温度档位是否递减
+	for (int j = 0; j < 9; j++)
+	{
+		if (nTempThresholds[j] <= nTempThresholds[j + 1])
+		{
+			AfxMessageBox("温度档位从上往下必须严格递减");
+			return FALSE;
 		}
 	}
 	//应用设置
@@ -564,12 +587,18 @@ BOOL CMyFanControlDlg::CheckAndSave()
 	m_core.m_config.TransitionTemp = nTransition;
 	m_core.m_config.ForceTemp = nForceTemp;
 	m_core.m_config.GPUFrequency = nFrequency;
+	m_core.m_config.LockMemOverclock = bLockMemOverclock;
+	m_core.m_config.MemOverclockOffset = nMemOffset;
 	for (int i = 0; i < 2; i++)
 	{
 		for (int j = 0; j < 10; j++)
 		{
 			m_core.m_config.DutyList[i][j] = nDutyList[i][j];
 		}
+	}
+	for (int j = 0; j < 10; j++)
+	{
+		m_core.m_config.TempThresholds[j] = nTempThresholds[j];
 	}
 	//保存
 	m_core.m_config.SaveConfig();
@@ -601,7 +630,6 @@ void CMyFanControlDlg::OnBnClickedButtonLoad()
 
 void CMyFanControlDlg::SetTray(PCSTR string)//设置托盘图标
 {
-	static BOOL added = FALSE;
 	NOTIFYICONDATA nid;
 	nid.cbSize = (DWORD)sizeof(NOTIFYICONDATA);
 	nid.hWnd = this->m_hWnd;
@@ -612,20 +640,22 @@ void CMyFanControlDlg::SetTray(PCSTR string)//设置托盘图标
 	if (string)
 	{
 		strcpy_s(nid.szTip, 128, string);//信息提示内容  
-		if (!added)
+		if (!m_bTrayAdded)  // 改为成员变量
 		{
 			Shell_NotifyIcon(NIM_ADD, &nid);//在托盘区添加图标
-			added = TRUE;
+			m_bTrayAdded = TRUE;  // 改为成员变量
 		}
 		else
 		{
-			Shell_NotifyIcon(NIM_MODIFY, &nid);//在托盘区添加图标
+			Shell_NotifyIcon(NIM_MODIFY, &nid);//修改托盘区图标
 		}
 	}
 	else
+	{
 		Shell_NotifyIcon(NIM_DELETE, &nid);
+		m_bTrayAdded = FALSE; 
+	}
 }
-
 
 
 LRESULT CMyFanControlDlg::OnShowTask(WPARAM wParam, LPARAM lParam)
@@ -636,7 +666,7 @@ LRESULT CMyFanControlDlg::OnShowTask(WPARAM wParam, LPARAM lParam)
 	{
 	case WM_LBUTTONUP://左键单击显示主界面
 	{
-						  
+
 	}break;
 	case WM_RBUTTONUP://右击弹出菜单
 	{
@@ -657,9 +687,9 @@ LRESULT CMyFanControlDlg::OnShowTask(WPARAM wParam, LPARAM lParam)
 			OnCancel();
 
 		}
-		else if (xx == IDR_EXIT) 
+		else if (xx == IDR_EXIT)
 		{
-			OnOK(); 
+			OnOK();
 		}
 		HMENU hmenu = menu.Detach();
 		menu.DestroyMenu();
@@ -709,18 +739,35 @@ void CMyFanControlDlg::OnBnClickedCheckLinear()
 	m_core.m_config.Linear = val;
 }
 
+void CMyFanControlDlg::OnBnClickedCheckSoftControl()
+{
+	// TODO:  在此添加控件通知处理程序代码
+	int val = m_ctlSoftControl.GetCheck();
+	m_core.m_config.SoftControl = val;
+
+	// 初始化软性控制当前值
+	if (val)
+	{
+		for (int i = 0; i < 2; i++)
+		{
+			m_core.m_nSoftCurrentDuty[i] = m_core.m_nCurDuty[i];
+			m_core.m_nSoftTargetDuty[i] = m_core.m_nSetDuty[i];
+		}
+	}
+}
+
 void CMyFanControlDlg::SetAdvancedMode(BOOL bAdvanced)
 {
 	CRect rect;
 	this->GetWindowRect(rect);
 	if (bAdvanced)
 	{
-		MoveWindow(rect.left, rect.top,  m_nWindowSize[0], m_nWindowSize[1], TRUE);
+		MoveWindow(rect.left, rect.top, m_nWindowSize[0], m_nWindowSize[1], TRUE);
 		GetDlgItem(IDC_BUTTON_ADVANCED)->SetWindowTextA("简单模式");
 	}
 	else
 	{
-		MoveWindow(rect.left, rect.top, m_nWindowSize[0] * 335 / 582, m_nWindowSize[1] * 283 / 463, FALSE);
+		MoveWindow(rect.left, rect.top, m_nWindowSize[0] * 335 / 582, m_nWindowSize[1] * 283 / 485, FALSE);
 		GetDlgItem(IDC_BUTTON_ADVANCED)->SetWindowTextA("高级模式");
 	}
 	m_bAdvancedMode = !m_bAdvancedMode;
@@ -740,7 +787,7 @@ void CMyFanControlDlg::OnBnClickedCheckAutorun()
 	if (val)
 	{
 		int rv = MessageBox("请选择开机自动启动方式：\r\n\r\n按\"是\"：注册表启动项自启动\r\n按\"否\"：任务计划自启动（管理员权限）\r\n按\"取消\"：放弃操作", "开机自动启动", MB_YESNOCANCEL);
-		
+
 		if (IDYES == rv)
 		{
 			set_rv = SetAutorunReg(TRUE, TRUE);
@@ -790,7 +837,7 @@ BOOL CMyFanControlDlg::SetAutorunReg(BOOL bWrite, BOOL bAutorun)
 
 			nSize = strPath.GetLength();
 			if (RegSetValueEx(hKey, strProduct, 0, REG_SZ,
-				(unsigned char *)strPath.GetBuffer(strPath.GetLength()), nSize) != ERROR_SUCCESS)
+				(unsigned char*)strPath.GetBuffer(strPath.GetLength()), nSize) != ERROR_SUCCESS)
 			{
 				AfxMessageBox("无法写入注册表启动项，需要用管理员权限运行");
 				RegCloseKey(hKey);
@@ -843,7 +890,7 @@ BOOL CMyFanControlDlg::SetAutorunTask(BOOL bWrite, BOOL bAutorun)
 				return FALSE;
 			}
 			strcmd.Format("SCHTASKS /Create /F /XML %s /TN %s", strXmlPath, strTaskName);
-			
+
 		}
 		else
 		{
@@ -865,7 +912,7 @@ BOOL CMyFanControlDlg::SetAutorunTask(BOOL bWrite, BOOL bAutorun)
 		return FALSE;
 	}
 	PCTSTR strFind = bWrite ? (bAutorun ? "成功创建" : "成功删除") : strTaskName;
-	if (rs.Find(strFind)>=0)
+	if (rs.Find(strFind) >= 0)
 		return TRUE;
 	return FALSE;
 }
@@ -902,7 +949,7 @@ CString CMyFanControlDlg::ExecuteCmd(CString str)
 	}
 	CloseHandle(hWrite);
 
-	char buffer[4096]="";
+	char buffer[4096] = "";
 	memset(buffer, 0, 4096);
 	CString output;
 	DWORD byteRead;
@@ -974,11 +1021,11 @@ BOOL CMyFanControlDlg::CreateTaskXml(PCSTR strXmlPath, PCSTR strTargetPath)
 </Task>\r\n";
 	char str[10240];
 	sprintf_s(str, 10240, XmlStr, strTargetPath);
-	FILE *fp;
+	FILE* fp;
 	fp = fopen(strXmlPath, "wt");
 	if (!fp)
 		return FALSE;
-	fwrite(str, strlen(str), 1,fp);
+	fwrite(str, strlen(str), 1, fp);
 
 	fclose(fp);
 	return TRUE;
@@ -1037,4 +1084,38 @@ BOOL CMyFanControlDlg::CheckInputFrequency(int nFrequency)
 
 
 	return TRUE;
+}
+
+void CMyFanControlDlg::OnBnClickedCheckLockMemOverclock()
+{
+	int val = m_ctlLockMemOverclock.GetCheck();
+	if (val)
+	{
+		// 检查显存偏移值是否有效
+		char str[256];
+		m_ctlMemOffset.GetWindowTextA(str, 256);
+		int nMemOffset = atoi(str);
+
+		if (nMemOffset < m_core.m_GpuInfo.m_nMemoryRangeMin || nMemOffset > m_core.m_GpuInfo.m_nMemoryRangeMax)
+		{
+			char str2[256];
+			sprintf_s(str2, 256, "显存频率偏移必须为%d-%d，默认值为0", m_core.m_GpuInfo.m_nMemoryRangeMin, m_core.m_GpuInfo.m_nMemoryRangeMax);
+			AfxMessageBox(str2);
+			m_ctlLockMemOverclock.SetCheck(FALSE);
+			return;
+		}
+
+		// 安全警告
+		if (nMemOffset > 0)
+		{
+			int rv = MessageBox("修改显存频率可能导致系统不稳定或损坏显卡，是否确认？", "安全警告", MB_YESNO | MB_ICONWARNING);
+			if (rv == IDNO)
+			{
+				m_ctlLockMemOverclock.SetCheck(FALSE);
+				return;
+			}
+		}
+	}
+
+	m_core.m_config.LockMemOverclock = m_ctlLockMemOverclock.GetCheck();
 }
