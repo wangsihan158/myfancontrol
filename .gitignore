@@ -1,7 +1,0 @@
-# Visual Studio 忽略规则
-.vs/
-bin/
-obj/
-*.user
-*.suo
-*.cache
