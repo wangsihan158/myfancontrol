@@ -19,7 +19,7 @@ public:
 	~CMyFanControlDlg();
 
 	// 对话框数据
-	enum { IDD = IDD_MYFANCONTROL_DIALOG };
+	enum { IDD = IDD_MYFANCONTROL_DIALOG};
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);	// DDX/DDV 支持
@@ -39,6 +39,7 @@ public:
 	BOOL m_bForceHideWindow;//启动时强制隐藏窗口
 	CCore m_core;//温度控制内核
 	HANDLE m_hCoreThread;//内核线程
+	DWORD m_dwCoreThreadId;//内核线程ID
 	int m_nLastCoreUpdateTime;//内核最后更新时间
 	CListCtrl m_ctlStatus;// 状态表控件
 	CButton m_ctlTakeOver;
@@ -54,6 +55,15 @@ public:
 	int m_nWindowSize[2];//完整窗口尺寸
 	BOOL m_bAdvancedMode;//高级模式
 	BOOL m_bTrayAdded;//托盘图标是否已添加
+
+	// 电源管理相关
+	BOOL m_bResumeFromSleep;//系统从休眠恢复标志
+	int m_nResumeOkCount;//休眠恢复后成功更新的次数
+
+	// 工作线程卡死处理相关
+	BOOL m_bThreadKilledOnce;//线程是否已被终止过一次
+	ULONGLONG m_dwFirstDeadTime;//第一次卡死的时间戳（GetTickCount）
+	BOOL m_bWaitingForRestart;//是否正在等待线程重启完成
 
 public:
 	static DWORD WINAPI CoreThread(LPVOID lParam);
@@ -88,4 +98,10 @@ public:
 	CEdit m_ctlMemOffset;//显存偏移编辑框
 	afx_msg void OnBnClickedCheckLockMemOverclock();  // 显存偏移复选框事件
 	afx_msg LRESULT OnTaskbarCreated(WPARAM wParam, LPARAM lParam);//explorer重启事件
+
+	// 电源管理事件
+	afx_msg LRESULT OnPowerBroadcast(WPARAM wParam, LPARAM lParam);
+
+	// GPU错误通知处理
+	afx_msg LRESULT OnGpuError(WPARAM wParam, LPARAM lParam);
 };

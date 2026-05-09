@@ -35,6 +35,11 @@ typedef int(__stdcall In_1_Out_n_Func)(int);
 typedef int(__stdcall In_2_Out_n_Func)(int, int);
 typedef PCWSTR(__stdcall In_0_Out_s_Func)(void);
 
+// GPU错误通知消息定义
+#define WM_GPU_ERROR (WM_USER + 100)
+
+class CCore; // 前向声明
+
 class CGPUInfo
 {
 public:
@@ -57,14 +62,30 @@ public:
 	int m_nMemoryClock;
 	int m_nUsage;//使用率
 	int m_nMemOverclockOffset;//显存频率偏移
+
+	// 休眠恢复标志（由外部设置）
+	BOOL m_bResumeFromSleep;
+
 public:
 	BOOL Update();//更新GPU频率和使用率
 	BOOL LockFrequency(int frequency = 0);//锁定最大频率，可以用于超频，应小于m_nBoostClock+(m_nGraphicsRangeMax - m_nGraphicsRangeMin)，若设置0，则还原设置
 	BOOL SetMemOverclockOffset(int offset);//设置显存频率偏移
+	void SetNotifyWindow(HWND hWnd);//设置错误通知窗口句柄
 
 protected:
+	void ReportError(LPCTSTR szErrorMsg);//非阻塞式错误报告
+
 	HMODULE m_hGPUdll;
 	int m_nLockClock;//已设置的最大核心频率
+	
+	// 硬件状态缓存，避免重复设置
+	int m_nLastSetCoreOC;       // 最后成功设置的核心超频偏移
+	int m_nLastSetMemOC;        // 最后成功设置的显存偏移
+	int m_nLastLockedClock;     // 最后锁定的核心频率（0表示无锁）
+	BOOL m_bMemOCSet;           // 显存偏移是否已成功设置过
+	
+	HWND m_hWndNotify;          // 错误通知目标窗口
+
 	//接口函数
 	In_0_Out_n_Func* m_pfnInitGPU_API;
 	In_1_Out_n_Func* m_pfnSet_GPU_Number;
@@ -125,6 +146,10 @@ class CCore
 public:
 	CCore();
 	~CCore();
+
+	// 设置父对话框指针（用于获取休眠状态等）
+	void SetParentDialog(class CMyFanControlDlg* pDlg) { m_pParentDlg = pDlg; }
+
 protected:
 
 	InitIo* m_pfnInitIo;
@@ -160,6 +185,14 @@ public:
 	// 多媒体定时器相关
 	UINT m_nTimerID;//定时器ID
 	static void CALLBACK TimerCallback(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2);//定时器回调
+
+	// 软性控制独立线程
+	HANDLE m_hSoftControlThread;
+	static DWORD WINAPI SoftControlThreadProc(LPVOID lpParam);
+	CRITICAL_SECTION m_csFanControl;   // 保护风扇硬件操作的临界区
+
+	// 父对话框指针（用于访问休眠状态等）
+	class CMyFanControlDlg* m_pParentDlg;
 
 public:
 	BOOL Init();

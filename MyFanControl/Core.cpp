@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "Core.h"
+#include "MyFanControlDlg.h"
 
 
 int TEMP_LIST[10] = { 90, 85, 80, 75, 70, 65, 60, 55, 50, 45 };
@@ -36,20 +37,25 @@ int GetTimeInterval(int a, int b, int* p)
 	int d = (c / 3600) * 10000 + (c % 3600) / 60 * 100 + c % 60;
 	return d * sgn;
 }
-CString GetExePath() {
-	char pathbuf[1024] = { 0 };
-	int pathlen = ::GetModuleFileName(NULL, pathbuf, 1024);
 
-	while (TRUE)
-	{
-		if (pathbuf[pathlen--] == '\\')
-		{
-			break;
-		}
-	}
-	pathbuf[++pathlen] = 0x0;
-	CString fname = pathbuf;
-	return fname;
+CString GetExePath()
+{
+	TCHAR pathbuf[MAX_PATH] = { 0 };
+	DWORD pathlen = ::GetModuleFileName(NULL, pathbuf, MAX_PATH);
+	if (pathlen == 0 || pathlen >= MAX_PATH)
+		return _T("");
+
+	// 从后向前查找最后一个反斜杠
+	int i = (int)pathlen - 1;
+	while (i >= 0 && pathbuf[i] != _T('\\'))
+		i--;
+
+	if (i >= 0)
+		pathbuf[i + 1] = _T('\0');   // 截断为目录路径
+	else
+		pathbuf[0] = _T('\0');       // 未找到反斜杠
+
+	return CString(pathbuf);
 }
 
 
@@ -58,7 +64,16 @@ CGPUInfo::CGPUInfo()
 	TRACE0("开始加载NVGPU_DLL.dll。\n");
 	m_hGPUdll = NULL;
 	m_nMemOverclockOffset = 0;
-	CString dllpth = GetExePath() + "\\NVGPU_DLL.dll";
+
+	// 初始化状态缓存
+	m_nLastSetCoreOC = 0;
+	m_nLastSetMemOC = 0;
+	m_nLastLockedClock = 0;
+	m_bMemOCSet = FALSE;
+	m_bResumeFromSleep = FALSE;
+	m_hWndNotify = NULL;
+
+	CString dllpth = GetExePath() + _T("\\NVGPU_DLL.dll");
 	m_hGPUdll = LoadLibrary(dllpth);
 	if (m_hGPUdll == NULL)
 	{
@@ -106,13 +121,21 @@ CGPUInfo::CGPUInfo()
 	m_nGraphicsRangeMax = m_pfnGet_GPU_Overclock_rangeMax();
 	m_nGraphicsRangeMin = m_pfnGet_GPU_Overclock_rangeMin();
 
-	// 先计算标准频率和最大频率
+	// 标准频率和最大频率
 	m_nStandardFrequency = m_nBoostClock - m_nGraphicsRangeMin;
 	m_nMaxFrequency = m_nStandardFrequency + m_nGraphicsRangeMax;
 
-	// 直接使用核心默认频率的正负值作为显存偏移范围
-	m_nMemoryRangeMax = m_nStandardFrequency;
-	m_nMemoryRangeMin = -m_nStandardFrequency;
+	m_nMemoryRangeMax = 2000;
+	m_nMemoryRangeMin = -2000;
+
+	// 校验显存范围合理性
+	if (m_nMemoryRangeMax < m_nMemoryRangeMin || m_nMemoryRangeMax == 0)
+	{
+		TRACE("Invalid Memory OC range from NVAPI (min=%d, max=%d), falling back to ±500\n",
+			m_nMemoryRangeMin, m_nMemoryRangeMax);
+		m_nMemoryRangeMax = 500;
+		m_nMemoryRangeMin = -500;
+	}
 
 	m_nLockClock = -1;
 
@@ -120,6 +143,7 @@ CGPUInfo::CGPUInfo()
 
 	TRACE0("成功加载NVGPU_DLL.dll。\n");
 }
+
 CGPUInfo::~CGPUInfo()
 {
 	if (m_hGPUdll != NULL)
@@ -131,6 +155,34 @@ CGPUInfo::~CGPUInfo()
 		m_hGPUdll = NULL;
 	}
 }
+
+void CGPUInfo::SetNotifyWindow(HWND hWnd)
+{
+	m_hWndNotify = hWnd;
+}
+
+void CGPUInfo::ReportError(LPCTSTR szErrorMsg)
+{
+	if (m_hWndNotify && szErrorMsg)
+	{
+		// 分配堆内存存储错误消息（接收方负责释放）
+		size_t len = _tcslen(szErrorMsg) + 1;
+		TCHAR* pMsg = new TCHAR[len];
+		_tcscpy_s(pMsg, len, szErrorMsg);
+
+		if (!::PostMessage(m_hWndNotify, WM_GPU_ERROR, 0, (LPARAM)pMsg))
+		{
+			// 发送失败则释放内存
+			delete[] pMsg;
+		}
+	}
+	else
+	{
+		// 没有通知窗口，输出到调试日志
+		TRACE("GPU Error: %s\n", szErrorMsg);
+	}
+}
+
 BOOL CGPUInfo::Update()
 {
 	if (!m_hGPUdll)
@@ -142,6 +194,7 @@ BOOL CGPUInfo::Update()
 	m_nUsage = m_pfnGet_GPU_Util();
 	return TRUE;
 }
+
 BOOL CGPUInfo::LockFrequency(int frequency)
 {
 	if (!m_hGPUdll)
@@ -150,14 +203,10 @@ BOOL CGPUInfo::LockFrequency(int frequency)
 		return FALSE;
 	if (frequency == 0)
 		frequency = m_nStandardFrequency;
-	if (m_nLockClock == frequency)
-		return TRUE;
-	m_nLockClock = frequency;
 
 	int GpuOverclock = 0;
-	int MemOverclock = m_nMemOverclockOffset;
 	int GpuClock = 0;
-	//int MemClock = 0;
+
 	if (frequency > 0 && frequency < m_nStandardFrequency)
 	{
 		//降频
@@ -169,25 +218,74 @@ BOOL CGPUInfo::LockFrequency(int frequency)
 		GpuOverclock = frequency - m_nStandardFrequency;
 	}
 
-	//
+	// 检查状态缓存，如果和上次设置完全一致则跳过
+	if (m_nLockClock == frequency &&
+		m_nLastSetCoreOC == GpuOverclock &&
+		m_nLastLockedClock == GpuClock)
+	{
+		return TRUE;
+	}
+
+	m_nLockClock = frequency;
+
+	// 设置核心超频偏移
 	int rv1 = (m_pfnSet_CoreOC(0, GpuOverclock) == 0);
 	if (!rv1)
-		AfxMessageBox("Set_CoreOC失败");
-	//
-	int rv2 = (m_pfnSet_MEMOC(0, MemOverclock) == 0);
-	if (!rv2)
-		AfxMessageBox("Set_MEMOC失败");
-	//
+	{
+		if (m_bResumeFromSleep)
+		{
+			// 休眠恢复后静默重试3次
+			for (int i = 0; i < 3; i++)
+			{
+				Sleep(200);
+				if (m_pfnSet_CoreOC(0, GpuOverclock) == 0)
+				{
+					rv1 = 1;
+					break;
+				}
+			}
+			if (!rv1)
+				TRACE("Set_CoreOC failed after resume retry\n");
+		}
+		else
+		{
+			ReportError(_T("Set_CoreOC失败"));
+		}
+	}
+
+	// 锁定核心频率
 	int rv3 = (m_pfnLock_Frequency(0, GpuClock) == 0x19);
 	if (!rv3)
-		AfxMessageBox("Lock_Frequency失败");
-	//
-	int rv4 = 1;
-	//
-	if (!rv4)
-		AfxMessageBox("Lock_Frequency_MEM失败");
-	//
-	return (rv1 && rv2 && rv3 && rv4);
+	{
+		if (m_bResumeFromSleep)
+		{
+			// 休眠恢复后静默重试3次
+			for (int i = 0; i < 3; i++)
+			{
+				Sleep(200);
+				if (m_pfnLock_Frequency(0, GpuClock) == 0x19)
+				{
+					rv3 = 1;
+					break;
+				}
+			}
+			if (!rv3)
+				TRACE("Lock_Frequency failed after resume retry\n");
+		}
+		else
+		{
+			ReportError(_T("Lock_Frequency失败"));
+		}
+	}
+
+	// 更新状态缓存
+	if (rv1 && rv3)
+	{
+		m_nLastSetCoreOC = GpuOverclock;
+		m_nLastLockedClock = GpuClock;
+	}
+
+	return (rv1 && rv3);
 }
 
 BOOL CGPUInfo::SetMemOverclockOffset(int offset)
@@ -198,17 +296,55 @@ BOOL CGPUInfo::SetMemOverclockOffset(int offset)
 	if (offset < m_nMemoryRangeMin || offset > m_nMemoryRangeMax)
 		return FALSE;
 
-	m_nMemOverclockOffset = offset;
+	// 检查缓存，如果已经设置为相同值则跳过
+	if (m_bMemOCSet && m_nLastSetMemOC == offset)
+		return TRUE;
 
 	int rv = (m_pfnSet_MEMOC(0, offset) == 0);
 	if (!rv)
 	{
-		AfxMessageBox("Set_MEMOC失败");
-		// 失败时自动恢复默认值0，并立即应用到硬件
-		m_pfnSet_MEMOC(0, 0);
-		m_nMemOverclockOffset = 0;
+		if (m_bResumeFromSleep)
+		{
+			// 休眠恢复后静默重试5次
+			for (int i = 0; i < 5; i++)
+			{
+				Sleep(200);
+				if (m_pfnSet_MEMOC(0, offset) == 0)
+				{
+					rv = 1;
+					break;
+				}
+			}
+
+			if (!rv)
+			{
+				// 静默失败，记录日志，恢复默认
+				TRACE("Set_MEMOC failed after resume retry, offset=%d\n", offset);
+				m_pfnSet_MEMOC(0, 0);
+				m_nLastSetMemOC = 0;
+				m_bMemOCSet = TRUE;
+				m_nMemOverclockOffset = 0;
+				return FALSE;
+			}
+		}
+		else
+		{
+			ReportError(_T("Set_MEMOC失败"));
+			// 失败时自动恢复默认值0，并立即应用到硬件
+			m_pfnSet_MEMOC(0, 0);
+			m_nLastSetMemOC = 0;
+			m_bMemOCSet = TRUE;
+			m_nMemOverclockOffset = 0;
+			return FALSE;
+		}
 	}
-	return rv;
+
+	// 更新状态缓存
+	m_nLastSetMemOC = offset;
+	m_bMemOCSet = TRUE;
+	m_nMemOverclockOffset = offset;
+
+	return TRUE;
 }
 
 CConfig::CConfig()
@@ -256,14 +392,14 @@ void CConfig::LoadDefault()
 }
 void CConfig::LoadConfig()
 {
-	CString strPath = GetExePath() + "\\MyFanControl.cfg";
+	CString strPath = GetExePath() + _T("\\MyFanControl.cfg");
 	CFile file;
 	if (!file.Open(strPath, CFile::modeRead | CFile::shareDenyNone))
 	{
 		SaveConfig();
 		if (!file.Open(strPath, CFile::modeRead | CFile::shareDenyNone))
 		{
-			AfxMessageBox("无法载入配置文件");
+			AfxMessageBox(_T("无法载入配置文件"));
 			return;
 		}
 	}
@@ -275,12 +411,12 @@ void CConfig::LoadConfig()
 		SaveConfig();
 		if (!file.Open(strPath, CFile::modeRead | CFile::shareDenyNone))
 		{
-			AfxMessageBox("重置后仍然无法载入配置文件");
+			AfxMessageBox(_T("重置后仍然无法载入配置文件"));
 			return;
 		}
 		if (file.GetLength() != sizeof(*this))
 		{
-			AfxMessageBox("配置文件格式不正确");
+			AfxMessageBox(_T("配置文件格式不正确"));
 			file.Close();
 			return;
 		}
@@ -291,11 +427,11 @@ void CConfig::LoadConfig()
 void CConfig::SaveConfig()
 {
 	FILE* fp = NULL;
-	CString strPath = GetExePath() + "\\MyFanControl.cfg";
-	fp = fopen(strPath, "wb");
+	CString strPath = GetExePath() + _T("\\MyFanControl.cfg");
+	fp = _tfopen(strPath, _T("wb"));
 	if (fp == NULL)
 	{
-		AfxMessageBox("无法保存配置文件");
+		AfxMessageBox(_T("无法保存配置文件"));
 		return;
 	}
 	fwrite(this, sizeof(*this), 1, fp);
@@ -317,6 +453,12 @@ CCore::CCore()
 	m_nExit = 0;
 	m_hInstDLL = NULL;
 	m_nTimerID = 0;  // 初始化定时器ID
+	m_hSoftControlThread = NULL;
+	m_pParentDlg = NULL;
+
+	// 初始化临界区
+	InitializeCriticalSectionEx(&m_csFanControl, 0, 0);
+
 	for (int i = 0; i < 2; i++)
 	{
 		m_nCurTemp[i] = 0;//当前温度
@@ -334,8 +476,17 @@ CCore::CCore()
 	m_bTakeOverStatus = FALSE;
 	m_bForcedRefresh = FALSE;
 }
+
 CCore::~CCore()
 {
+	// 确保软控线程退出
+	if (m_hSoftControlThread)
+	{
+		WaitForSingleObject(m_hSoftControlThread, 2000);
+		CloseHandle(m_hSoftControlThread);
+		m_hSoftControlThread = NULL;
+	}
+
 	// 确保定时器被清理
 	if (m_nTimerID)
 	{
@@ -343,6 +494,9 @@ CCore::~CCore()
 		m_nTimerID = 0;
 	}
 	Uninit();
+
+	// 删除临界区
+	DeleteCriticalSection(&m_csFanControl);
 }
 
 BOOL CCore::Init()
@@ -357,12 +511,12 @@ BOOL CCore::Init()
 	TRACE0("内核开始初始化。\n");
 	m_nInit = -1;
 	//
-	CString dllpth = GetExePath() + "\\ClevoEcInfo.dll";
+	CString dllpth = GetExePath() + _T("\\ClevoEcInfo.dll");
 
 	m_hInstDLL = LoadLibrary(dllpth);
 	if (m_hInstDLL == NULL)
 	{
-		AfxMessageBox("无法加载" + dllpth + "，请确保该文件在程序目录下，并且已安装NTPortDrv。");
+		AfxMessageBox(_T("无法加载") + dllpth + _T("，请确保该文件在程序目录下，并且已安装NTPortDrv。"));
 		return FALSE;
 	}
 
@@ -380,7 +534,7 @@ BOOL CCore::Init()
 	{
 		FreeLibrary(m_hInstDLL);
 		m_hInstDLL = NULL;
-		AfxMessageBox("错误的ClevoEcInfo.dll");
+		AfxMessageBox(_T("错误的ClevoEcInfo.dll"));
 		return FALSE;
 	}
 
@@ -388,7 +542,7 @@ BOOL CCore::Init()
 	{
 		FreeLibrary(m_hInstDLL);
 		m_hInstDLL = NULL;
-		AfxMessageBox("接口初始化返回值错误！");
+		AfxMessageBox(_T("接口初始化返回值错误！"));
 		return FALSE;
 	}
 
@@ -407,15 +561,34 @@ void CCore::Uninit()
 	m_nInit = 0;
 }
 
-// 定时器回调函数（静态函数）
+// 定时器回调函数
 void CALLBACK CCore::TimerCallback(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2)
 {
 	CCore* pCore = (CCore*)dwUser;
 	if (pCore && !pCore->m_nExit)
 	{
-		// 设置强制刷新标志，让主循环执行Work()
+		// 设置强制刷新标志，让主循环执行Work
 		pCore->m_bForcedRefresh = TRUE;
 	}
+}
+
+// 软性控制独立线程
+DWORD WINAPI CCore::SoftControlThreadProc(LPVOID lpParam)
+{
+	CCore* pCore = (CCore*)lpParam;
+	TRACE0("软性控制线程启动。\n");
+
+	while (!pCore->m_nExit)
+	{
+		if (pCore->m_config.SoftControl && pCore->m_config.TakeOver && !pCore->m_bForcedCooling)
+		{
+			pCore->SoftControlDuty();
+		}
+		Sleep(100);  // 每100ms调整1%
+	}
+
+	TRACE0("软性控制线程退出。\n");
+	return 0;
 }
 
 void CCore::Run()
@@ -425,9 +598,22 @@ void CCore::Run()
 	if (!m_nInit)
 		Init();
 
+	// 设置GPU错误通知窗口
+	if (m_pParentDlg)
+	{
+		m_GpuInfo.SetNotifyWindow(m_pParentDlg->GetSafeHwnd());
+	}
+
 	if (m_nInit == 1)
 	{
 		TRACE0("内核开始运行（多媒体定时器模式）。\n");
+
+		// 创建软性控制独立线程
+		m_hSoftControlThread = CreateThread(NULL, 0, SoftControlThreadProc, this, 0, NULL);
+		if (m_hSoftControlThread)
+		{
+			SetThreadPriority(m_hSoftControlThread, THREAD_PRIORITY_ABOVE_NORMAL);
+		}
 
 		// 获取定时器能力
 		TIMECAPS tc;
@@ -458,11 +644,6 @@ void CCore::Run()
 						m_nLastUpdateTime = GetTime();
 						m_bForcedRefresh = FALSE;
 					}
-					else if (m_config.SoftControl && m_config.TakeOver && !m_bForcedCooling)
-					{
-						// 软性控制每100ms执行一次
-						SoftControlDuty();
-					}
 
 					Sleep(500);
 				}
@@ -485,6 +666,14 @@ void CCore::Run()
 			m_nInit = 1;
 			RunOriginal();
 		}
+
+		// 等待软控线程结束
+		if (m_hSoftControlThread)
+		{
+			WaitForSingleObject(m_hSoftControlThread, 2000);
+			CloseHandle(m_hSoftControlThread);
+			m_hSoftControlThread = NULL;
+		}
 	}
 	m_nExit = 2;
 }
@@ -497,6 +686,14 @@ void CCore::RunOriginal()
 	if (m_nInit == 1)
 	{
 		TRACE0("内核开始运行（原始模式）。\n");
+
+		// 创建软性控制独立线程
+		m_hSoftControlThread = CreateThread(NULL, 0, SoftControlThreadProc, this, 0, NULL);
+		if (m_hSoftControlThread)
+		{
+			SetThreadPriority(m_hSoftControlThread, THREAD_PRIORITY_ABOVE_NORMAL);
+		}
+
 		int curtime;
 		while (!m_nExit)
 		{
@@ -514,14 +711,17 @@ void CCore::RunOriginal()
 					SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);//在首次更新成功后才设置高优先级
 				}
 			}
-			else if (m_config.SoftControl && m_config.TakeOver && !m_bForcedCooling)
-			{
-				// 软性控制：每0.1秒调整1%
-				SoftControlDuty();
-			}
 			Sleep(100);
 		}
 		TRACE0("内核结束运行。\n");
+
+		// 等待软控线程结束
+		if (m_hSoftControlThread)
+		{
+			WaitForSingleObject(m_hSoftControlThread, 2000);
+			CloseHandle(m_hSoftControlThread);
+			m_hSoftControlThread = NULL;
+		}
 	}
 	m_nExit = 2;
 }
@@ -529,6 +729,13 @@ void CCore::RunOriginal()
 void CCore::Work()
 {
 	Update();
+
+	// 同步休眠恢复状态
+	if (m_pParentDlg)
+	{
+		m_GpuInfo.m_bResumeFromSleep = m_pParentDlg->m_bResumeFromSleep;
+	}
+
 	if (m_bForcedCooling)//强制冷却
 	{
 		if (m_nCurTemp[0] >= m_config.ForceTemp || m_nCurTemp[1] >= m_config.ForceTemp)
@@ -540,11 +747,13 @@ void CCore::Work()
 				m_nSetDuty[1] = 100;
 				m_nSetDutyLevel[1] = 10;
 				// 强制冷却直接设置，不经过软性控制
+				EnterCriticalSection(&m_csFanControl);
 				for (int i = 0; i < 2; i++)
 				{
 					m_nSoftTargetDuty[i] = m_nSetDuty[i];
 					m_nSoftCurrentDuty[i] = m_nSetDuty[i];
 				}
+				LeaveCriticalSection(&m_csFanControl);
 				SetFanDuty();
 			}
 			return;
@@ -570,7 +779,7 @@ void CCore::Work()
 	{
 		if (!m_GpuInfo.SetMemOverclockOffset(m_config.MemOverclockOffset))
 		{
-			// 设置失败，自动停止显存偏移功能，归零并保存
+			// 设置失败，自动归零
 			m_config.LockMemOverclock = FALSE;
 			m_config.MemOverclockOffset = 0;
 			m_config.SaveConfig();
@@ -627,13 +836,15 @@ void CCore::Control()
 	//设定转速
 	if (m_config.SoftControl)
 	{
-		// 软性控制：设置目标值，由SoftControlDuty()逐步接近
+		// 软性控制：设置目标值，由SoftControlThreadProc()控制逐步接近
+		EnterCriticalSection(&m_csFanControl);
 		for (int i = 0; i < 2; i++)
 		{
 			m_nSoftTargetDuty[i] = m_nSetDuty[i];
 			if (m_nSoftCurrentDuty[i] <= 0)
 				m_nSoftCurrentDuty[i] = m_nCurDuty[i];
 		}
+		LeaveCriticalSection(&m_csFanControl);
 	}
 	else
 	{
@@ -735,6 +946,7 @@ void CCore::ResetFan()
 {
 	if (m_bTakeOverStatus)
 	{
+		EnterCriticalSection(&m_csFanControl);
 		m_nSetDuty[0] = 0;
 		m_nSetDutyLevel[0] = 0;
 		m_nSetDuty[1] = 0;
@@ -743,6 +955,8 @@ void CCore::ResetFan()
 		m_nSoftTargetDuty[1] = 0;
 		m_nSoftCurrentDuty[0] = 0;
 		m_nSoftCurrentDuty[1] = 0;
+		LeaveCriticalSection(&m_csFanControl);
+
 		m_pfnSetFANDutyAuto(1);
 		m_pfnSetFANDutyAuto(2);
 		m_pfnSetFANDutyAuto(3);
@@ -751,6 +965,7 @@ void CCore::ResetFan()
 }
 void CCore::SetFanDuty()
 {
+	EnterCriticalSection(&m_csFanControl);
 	int duty;
 	for (int i = 0; i < 2; i++)
 	{
@@ -762,10 +977,12 @@ void CCore::SetFanDuty()
 			m_pfnSetFanDuty(i + 2, duty);//如果存在第3个风扇
 	}
 	m_bTakeOverStatus = TRUE;
+	LeaveCriticalSection(&m_csFanControl);
 }
 
 void CCore::SoftControlDuty()
 {
+	EnterCriticalSection(&m_csFanControl);
 	BOOL bChanged = FALSE;
 	for (int i = 0; i < 2; i++)
 	{
@@ -780,6 +997,9 @@ void CCore::SoftControlDuty()
 			m_nSetDuty[i] = m_nSoftCurrentDuty[i];
 		}
 	}
+	LeaveCriticalSection(&m_csFanControl);
+
 	if (bChanged)
 		SetFanDuty();
+
 }

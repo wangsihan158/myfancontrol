@@ -1,15 +1,6 @@
-﻿  Core.cpp
+﻿  stdafx.cpp
+  Core.cpp
   MyFanControl.cpp
-D:\Code\MyFanControl3\MyFanControl\resource.h(59,9): warning C4005: “IDC_CHECK_LOCK_MEM_OVERCLOCK”: 宏重定义
-  (编译源文件“/MyFanControl.cpp”)
-      D:\Code\MyFanControl3\MyFanControl\resource.h(46,9):
-      参见“IDC_CHECK_LOCK_MEM_OVERCLOCK”的前一个定义
-  
   MyFanControlDlg.cpp
-D:\Code\MyFanControl3\MyFanControl\resource.h(59,9): warning C4005: “IDC_CHECK_LOCK_MEM_OVERCLOCK”: 宏重定义
-  (编译源文件“/MyFanControlDlg.cpp”)
-      D:\Code\MyFanControl3\MyFanControl\resource.h(46,9):
-      参见“IDC_CHECK_LOCK_MEM_OVERCLOCK”的前一个定义
-  
   正在生成代码...
-  MyFanControl.vcxproj -> D:\Code\MyFanControl3\Debug\MyFanControl.exe
+  MyFanControl.vcxproj -> D:\Code\MyFanControl\1.2\Debug\MyFanControl.exe

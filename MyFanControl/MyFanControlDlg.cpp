@@ -34,8 +34,8 @@ int GetCpuClock(int* CPU_usage)
 	FILETIME preidleTime, prekernelTime, preuserTime;
 	BOOL res = GetSystemTimes(&preidleTime, &prekernelTime, &preuserTime);
 	///
-	DWORD startTickCount = GetTickCount();
-	while (GetTickCount() - startTickCount < static_cast<DWORD>(100)) {}
+	ULONGLONG startTickCount = GetTickCount64();
+	while (GetTickCount64() - startTickCount < 100) {}
 	LARGE_INTEGER c3;
 	QueryPerformanceCounter(&c3);
 	unsigned __int64 end = __rdtsc();
@@ -101,12 +101,22 @@ CMyFanControlDlg::CMyFanControlDlg(CWnd* pParent /*=NULL*/)
 	m_bForceHideWindow = FALSE;//启动时强制隐藏窗口
 #endif
 	m_hCoreThread = NULL;
+	m_dwCoreThreadId = 0;
 	m_nLastCoreUpdateTime = -1;
 	m_bWindowVisible = FALSE;
 	m_bAdvancedMode = FALSE; // 默认高级模式
 	m_bTrayAdded = FALSE;
 	m_nWindowSize[0] = 0;
 	m_nWindowSize[1] = 0;
+
+	// 初始化电源管理变量
+	m_bResumeFromSleep = FALSE;
+	m_nResumeOkCount = 0;
+
+	// 初始化线程卡死处理变量
+	m_bThreadKilledOnce = FALSE;
+	m_dwFirstDeadTime = 0; 
+	m_bWaitingForRestart = FALSE;
 
 	m_nDutyEditCtlID[0][0] = IDC_EDIT_CPU0;
 	m_nDutyEditCtlID[0][1] = IDC_EDIT_CPU1;
@@ -184,7 +194,59 @@ BEGIN_MESSAGE_MAP(CMyFanControlDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_CHECK_LOCK_GPU_FREQUANCY, &CMyFanControlDlg::OnBnClickedCheckLockGpuFrequancy)
 	ON_BN_CLICKED(IDC_CHECK_LOCK_MEM_OVERCLOCK, &CMyFanControlDlg::OnBnClickedCheckLockMemOverclock)
 	ON_REGISTERED_MESSAGE(WM_TASKBARCREATED, &CMyFanControlDlg::OnTaskbarCreated)
+	ON_MESSAGE(WM_POWERBROADCAST, &CMyFanControlDlg::OnPowerBroadcast)
+	ON_MESSAGE(WM_GPU_ERROR, &CMyFanControlDlg::OnGpuError)
 END_MESSAGE_MAP()
+
+
+// 电源事件处理
+LRESULT CMyFanControlDlg::OnPowerBroadcast(WPARAM wParam, LPARAM lParam)
+{
+	if (wParam == PBT_APMRESUMEAUTOMATIC || wParam == PBT_APMRESUMESUSPEND)
+	{
+		TRACE("系统从休眠/睡眠恢复\n");
+		m_bResumeFromSleep = TRUE;
+		m_nResumeOkCount = 0;
+
+		// 同步到核心的GPU信息对象
+		m_core.m_GpuInfo.m_bResumeFromSleep = TRUE;
+	}
+	else if (wParam == PBT_APMSUSPEND)
+	{
+		TRACE("系统进入休眠/睡眠\n");
+	}
+	return TRUE;
+}
+
+// GPU错误通知处理
+LRESULT CMyFanControlDlg::OnGpuError(WPARAM wParam, LPARAM lParam)
+{
+	LPCTSTR szMsg = (LPCTSTR)lParam;
+	if (szMsg != NULL)
+	{
+		// 托盘气泡提示
+		NOTIFYICONDATA nid = { 0 };
+		nid.cbSize = sizeof(NOTIFYICONDATA);
+		nid.hWnd = this->m_hWnd;
+		nid.uID = IDR_MAINFRAME;
+		nid.uFlags = NIF_INFO;
+		nid.dwInfoFlags = NIIF_WARNING;
+		nid.uTimeout = 5000;  // 5秒显示时间
+
+		// 复制消息到气泡
+		_tcsncpy_s(nid.szInfoTitle, 64, _T("GPU控制错误"), 63);
+		_tcsncpy_s(nid.szInfo, 256, szMsg, 255);
+
+		Shell_NotifyIcon(NIM_MODIFY, &nid);
+
+		// 同时输出到调试日志
+		TRACE("GPU Error: %s\n", szMsg);
+
+		// 释放发送方分配的内存
+		delete[] szMsg;
+	}
+	return 0;
+}
 
 LRESULT CMyFanControlDlg::OnTaskbarCreated(WPARAM wParam, LPARAM lParam)
 {
@@ -226,10 +288,12 @@ BOOL CMyFanControlDlg::OnInitDialog()
 
 	SetTray("蓝天风扇监控");
 
+	// 设置核心的父对话框指针
+	m_core.SetParentDialog(this);
+
 	if (m_hCoreThread == NULL)
 	{
-		DWORD dwThreadID = 0;
-		m_hCoreThread = CreateThread(NULL, NULL, CoreThread, this, CREATE_SUSPENDED, &dwThreadID);
+		m_hCoreThread = CreateThread(NULL, NULL, CoreThread, this, CREATE_SUSPENDED, &m_dwCoreThreadId);
 		if (m_hCoreThread)
 		{
 			SetThreadPriority(m_hCoreThread, THREAD_PRIORITY_TIME_CRITICAL);
@@ -336,21 +400,110 @@ void CMyFanControlDlg::OnTimer(UINT_PTR nIDEvent)
 {
 	static int nCheckThreadCount = 0;
 	CDialogEx::OnTimer(nIDEvent);
+
 	if (m_core.m_nExit == 2)
 	{
 		OnOK();
+		return;
+	}
+
+	// 处理休眠恢复后的计数器
+	if (m_bResumeFromSleep)
+	{
+		if (m_core.m_nLastUpdateTime != m_nLastCoreUpdateTime)
+		{
+			m_nResumeOkCount++;
+			if (m_nResumeOkCount >= 3)
+			{
+				TRACE("休眠恢复后已成功更新3次，清除恢复标志\n");
+				m_bResumeFromSleep = FALSE;
+				m_nResumeOkCount = 0;
+				m_core.m_GpuInfo.m_bResumeFromSleep = FALSE;
+			}
+		}
 	}
 
 	nCheckThreadCount++;
-	if (nCheckThreadCount > 150)
+	if (nCheckThreadCount > 150 && !m_bWaitingForRestart)
 	{
-		KillTimer(0);
-		m_core.m_nExit = 2;
-		TerminateThread(m_hCoreThread, -1);
+		// 工作线程卡死处理
+		TRACE("检测到工作线程可能卡死，尝试退出...\n");
+
+		// 先尝试退出旧线程
+		if (!m_core.m_nExit)
+		{
+			m_core.m_nExit = 1;
+		}
+
+		// 等待最多3秒
+		DWORD dwWait = WaitForSingleObject(m_hCoreThread, 3000);
+		if (dwWait == WAIT_TIMEOUT)
+		{
+			TRACE("检测到工作线程卡死，程序将退出\n");
+			m_core.m_nExit = 2;
+			KillTimer(0);
+			MessageBox(_T("检测到工作线程卡死，程序将关闭。\r\n请检查硬件兼容性或尝试重启系统。"), _T("严重错误"), MB_OK | MB_ICONERROR);
+			OnOK();
+			return;
+		}
 		CloseHandle(m_hCoreThread);
 		m_hCoreThread = NULL;
-		MessageBox("检测到工作线程卡死，程序将立刻结束，如果重试后问题仍然存在，说明本程序可能不适用于此电脑。");
-		OnOK();
+
+		// 检查是否一分钟内再次卡死
+		ULONGLONG dwNow = GetTickCount64();
+		if (m_bThreadKilledOnce && (dwNow - m_dwFirstDeadTime < 60000))
+		{
+			MessageBox(_T("工作线程屡次卡死，程序将关闭。\r\n请检查硬件兼容性或尝试重启系统。"), _T("严重错误"), MB_OK | MB_ICONERROR);
+			m_core.m_nExit = 2;
+			OnOK();
+			return;
+		}
+
+		// 记录第一次卡死时间
+		if (!m_bThreadKilledOnce)
+		{
+			m_bThreadKilledOnce = TRUE;
+			m_dwFirstDeadTime = dwNow;
+			m_bWaitingForRestart = TRUE;
+
+			// 提示（PostMessage实现）
+			PostMessage(WM_USER + 200);  // 将在下次消息循环中处理
+		}
+		else
+		{
+			// 创建新线程
+			TRACE("重新创建工作线程...\n");
+			m_core.m_nExit = 0;
+			m_core.m_nInit = 0;  // 需要重新初始化
+			m_hCoreThread = CreateThread(NULL, NULL, CoreThread, this, 0, &m_dwCoreThreadId);
+			if (m_hCoreThread)
+			{
+				SetThreadPriority(m_hCoreThread, THREAD_PRIORITY_TIME_CRITICAL);
+			}
+			m_bWaitingForRestart = FALSE;
+			nCheckThreadCount = 0;
+			MessageBox(_T("检测到工作线程卡死，已自动重启。\r\n如果问题持续，建议检查硬件兼容性。"), _T("工作线程重启"), MB_OK | MB_ICONINFORMATION);
+		}
+	}
+
+	// 处理线程重启提示消息
+	if (m_bWaitingForRestart)
+	{
+		MSG msg;
+		if (PeekMessage(&msg, m_hWnd, WM_USER + 200, WM_USER + 200, PM_REMOVE))
+		{
+			// 创建新线程
+			TRACE("重新创建工作线程（用户确认后）...\n");
+			m_core.m_nExit = 0;
+			m_core.m_nInit = 0;
+			m_hCoreThread = CreateThread(NULL, NULL, CoreThread, this, 0, &m_dwCoreThreadId);
+			if (m_hCoreThread)
+			{
+				SetThreadPriority(m_hCoreThread, THREAD_PRIORITY_TIME_CRITICAL);
+			}
+			m_bWaitingForRestart = FALSE;
+			nCheckThreadCount = 0;
+		}
 	}
 
 	if (m_core.m_nInit != 1)
@@ -488,7 +641,7 @@ BOOL CMyFanControlDlg::CheckAndSave()
 	int nInterval = atoi(str);
 	if (nInterval < 1 || nInterval > 5)
 	{
-		AfxMessageBox("更新间隔必须为1-5");
+		AfxMessageBox(_T("更新间隔必须为1-5"));
 		return FALSE;
 	}
 	//
@@ -496,7 +649,7 @@ BOOL CMyFanControlDlg::CheckAndSave()
 	int nTransition = atoi(str);
 	if (nTransition < 0 || nTransition > 10)
 	{
-		AfxMessageBox("过渡温度必须为0-10");
+		AfxMessageBox(_T("过渡温度必须为0-10"));
 		return FALSE;
 	}
 	//
@@ -504,7 +657,7 @@ BOOL CMyFanControlDlg::CheckAndSave()
 	int nForceTemp = atoi(str);
 	if (nForceTemp < 0 || nForceTemp > 90)
 	{
-		AfxMessageBox("强制冷却温度必须为0-90");
+		AfxMessageBox(_T("强制冷却温度必须为0-90"));
 		return FALSE;
 	}
 	//
@@ -537,7 +690,7 @@ BOOL CMyFanControlDlg::CheckAndSave()
 		{
 			char str2[256];
 			sprintf_s(str2, 256, "显存频率偏移为%dMHz，超频可能降低系统稳定性。\n是否确认要设置？", nMemOffset);
-			int rv = MessageBox(str2, "确认设置", MB_YESNO);
+			int rv = MessageBox(str2, _T("确认设置"), MB_YESNO);
 			if (IDNO == rv)
 				return FALSE;
 		}
@@ -578,7 +731,7 @@ BOOL CMyFanControlDlg::CheckAndSave()
 	{
 		if (nTempThresholds[j] <= nTempThresholds[j + 1])
 		{
-			AfxMessageBox("温度档位从上往下必须严格递减");
+			AfxMessageBox(_T("温度档位从上往下必须严格递减"));
 			return FALSE;
 		}
 	}
@@ -653,7 +806,7 @@ void CMyFanControlDlg::SetTray(PCSTR string)//设置托盘图标
 	else
 	{
 		Shell_NotifyIcon(NIM_DELETE, &nid);
-		m_bTrayAdded = FALSE; 
+		m_bTrayAdded = FALSE;
 	}
 }
 
@@ -675,11 +828,11 @@ LRESULT CMyFanControlDlg::OnShowTask(WPARAM wParam, LPARAM lParam)
 		CMenu menu;
 		menu.CreatePopupMenu();
 		if (m_bWindowVisible)
-			menu.AppendMenu(MFT_STRING, IDR_SHOW, "隐藏");
+			menu.AppendMenu(MFT_STRING, IDR_SHOW, _T("隐藏"));
 		else
-			menu.AppendMenu(MFT_STRING, IDR_SHOW, "显示");
+			menu.AppendMenu(MFT_STRING, IDR_SHOW, _T("显示"));
 		menu.AppendMenu(MFT_SEPARATOR);
-		menu.AppendMenu(MFT_STRING, IDR_EXIT, "退出");
+		menu.AppendMenu(MFT_STRING, IDR_EXIT, _T("退出"));
 		SetForegroundWindow();//不加此行在菜单外点击菜单不销毁
 		int xx = TrackPopupMenu(menu, TPM_RETURNCMD, lpoint->x, lpoint->y, NULL, this->m_hWnd, NULL);//显示菜单并获取选项ID
 		if (xx == IDR_SHOW)
@@ -786,7 +939,7 @@ void CMyFanControlDlg::OnBnClickedCheckAutorun()
 	int set_rv;
 	if (val)
 	{
-		int rv = MessageBox("请选择开机自动启动方式：\r\n\r\n按\"是\"：注册表启动项自启动\r\n按\"否\"：任务计划自启动（管理员权限）\r\n按\"取消\"：放弃操作", "开机自动启动", MB_YESNOCANCEL);
+		int rv = MessageBox(_T("请选择开机自动启动方式：\r\n\r\n按\"是\"：注册表启动项自启动\r\n按\"否\"：任务计划自启动（管理员权限）\r\n按\"取消\"：放弃操作"), _T("开机自动启动"), MB_YESNOCANCEL);
 
 		if (IDYES == rv)
 		{
@@ -820,9 +973,9 @@ void CMyFanControlDlg::OnBnClickedCheckAutorun()
 BOOL CMyFanControlDlg::SetAutorunReg(BOOL bWrite, BOOL bAutorun)
 {
 	HKEY hKey;
-	if (RegOpenKey(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", &hKey) != ERROR_SUCCESS)
+	if (RegOpenKey(HKEY_LOCAL_MACHINE, _T("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"), &hKey) != ERROR_SUCCESS)
 	{
-		AfxMessageBox("无法打开注册表");
+		AfxMessageBox(_T("无法打开注册表"));
 		return FALSE;
 	}
 	PCSTR strProduct = "LanTianFanMonitor";
@@ -831,15 +984,15 @@ BOOL CMyFanControlDlg::SetAutorunReg(BOOL bWrite, BOOL bAutorun)
 	{
 		if (bAutorun)
 		{
-			CString			strPath = GetExePath() + "\\MyFanControl.exe";
-			unsigned long	nSize = 0;
+			CString strPath = GetExePath() + _T("\\MyFanControl.exe");
+			unsigned long nSize = 0;
 
 
 			nSize = strPath.GetLength();
 			if (RegSetValueEx(hKey, strProduct, 0, REG_SZ,
 				(unsigned char*)strPath.GetBuffer(strPath.GetLength()), nSize) != ERROR_SUCCESS)
 			{
-				AfxMessageBox("无法写入注册表启动项，需要用管理员权限运行");
+				AfxMessageBox(_T("无法写入注册表启动项，需要用管理员权限运行"));
 				RegCloseKey(hKey);
 				return FALSE;
 			}
@@ -848,7 +1001,7 @@ BOOL CMyFanControlDlg::SetAutorunReg(BOOL bWrite, BOOL bAutorun)
 		{
 			if (RegDeleteValue(hKey, strProduct) != ERROR_SUCCESS)
 			{
-				AfxMessageBox("无法删除注册表启动项，需要用管理员权限运行");
+				AfxMessageBox(_T("无法删除注册表启动项，需要用管理员权限运行"));
 				RegCloseKey(hKey);
 				return FALSE;
 			}
@@ -859,7 +1012,7 @@ BOOL CMyFanControlDlg::SetAutorunReg(BOOL bWrite, BOOL bAutorun)
 	else
 	{
 		//检查注册表项
-		BOOL		  bRet = FALSE;
+		BOOL bRet = FALSE;
 		unsigned long lSize = sizeof(bRet);
 		if (RegQueryValueEx(hKey, strProduct, NULL, NULL, NULL, &lSize) != ERROR_SUCCESS)
 		{
@@ -875,43 +1028,43 @@ BOOL CMyFanControlDlg::SetAutorunReg(BOOL bWrite, BOOL bAutorun)
 
 BOOL CMyFanControlDlg::SetAutorunTask(BOOL bWrite, BOOL bAutorun)
 {
-	CString strTaskName = "蓝天风扇监控";
-	CString strPath = GetExePath() + "\\MyFanControl.exe";
+	CString strTaskName = _T("蓝天风扇监控");
+	CString strPath = GetExePath() + _T("\\MyFanControl.exe");
 	CString strcmd;
-	CString strXmlPath = GetExePath() + "\\task.xml";
+	CString strXmlPath = GetExePath() + _T("\\task.xml");
 	if (bWrite)
 	{
 		if (bAutorun)
 		{
-			BOOL  rv = CMyFanControlDlg::CreateTaskXml(strXmlPath, strPath);
+			BOOL rv = CMyFanControlDlg::CreateTaskXml(strXmlPath, strPath);
 			if (!rv)
 			{
-				AfxMessageBox("无法创建任务计划程序xml文件");
+				AfxMessageBox(_T("无法创建任务计划程序xml文件"));
 				return FALSE;
 			}
-			strcmd.Format("SCHTASKS /Create /F /XML %s /TN %s", strXmlPath, strTaskName);
+			strcmd.Format(_T("SCHTASKS /Create /F /XML %s /TN %s"), (LPCTSTR)strXmlPath, (LPCTSTR)strTaskName);
 
 		}
 		else
 		{
-			strcmd = "SCHTASKS /Delete /F /TN " + strTaskName;
+			strcmd = _T("SCHTASKS /Delete /F /TN ") + strTaskName;
 		}
 	}
 	else
 	{
-		strcmd = "SCHTASKS /Query /TN " + strTaskName;
+		strcmd = _T("SCHTASKS /Query /TN ") + strTaskName;
 	}
 	CString rs = ExecuteCmd(strcmd);
 	if (bWrite && bAutorun)
 		remove(strXmlPath);
-	if (rs == "[执行失败]" || rs.Find("拒绝访问") >= 0)
+	if (rs == _T("[执行失败]") || rs.Find(_T("拒绝访问")) >= 0)
 	{
 		CString str;
-		str.Format("无法%s任务计划程序，需要用管理员权限运行", bWrite ? (bAutorun ? "创建" : "删除") : ("读取"));
+		str.Format(_T("无法%s任务计划程序，需要用管理员权限运行"), bWrite ? (bAutorun ? _T("创建") : _T("删除")) : _T("读取"));
 		AfxMessageBox(str);
 		return FALSE;
 	}
-	PCTSTR strFind = bWrite ? (bAutorun ? "成功创建" : "成功删除") : strTaskName;
+	PCTSTR strFind = bWrite ? (bAutorun ? _T("成功创建") : _T("成功删除")) : (LPCTSTR)strTaskName;
 	if (rs.Find(strFind) >= 0)
 		return TRUE;
 	return FALSE;
@@ -928,30 +1081,32 @@ CString CMyFanControlDlg::ExecuteCmd(CString str)
 	if (!CreatePipe(&hRead, &hWrite, &sa, 0))
 	{
 #ifdef MY_DEBUG
-		AfxMessageBox("无法创建管道");
+		AfxMessageBox(_T("无法创建管道"));
 #endif
-		return "[执行失败]";
+		return _T("[执行失败]");
 	}
 	STARTUPINFO si = { sizeof(si) };
-	PROCESS_INFORMATION pi;
+	PROCESS_INFORMATION pi = { 0 };  // 初始化为0
 	si.hStdError = hWrite;
 	si.hStdOutput = hWrite;
 	si.wShowWindow = SW_HIDE;
 	si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
 	char cmdline[1024];
-	strcpy_s(cmdline, 1024, str);
+	strcpy_s(cmdline, 1024, CT2A(str));
 	if (!CreateProcess(NULL, cmdline, NULL, NULL, TRUE, NULL, NULL, NULL, &si, &pi))
 	{
 #ifdef MY_DEBUG
-		AfxMessageBox("无法创建命令行进程");
+		AfxMessageBox(_T("无法创建命令行进程"));
 #endif
-		return "[执行失败]";
+		CloseHandle(hWrite);
+		CloseHandle(hRead);
+		return _T("[执行失败]");
 	}
 	CloseHandle(hWrite);
 
 	char buffer[4096] = "";
 	memset(buffer, 0, 4096);
-	CString output;
+	CStringA outputA;
 	DWORD byteRead;
 	int i = 0;
 	while (true)
@@ -960,11 +1115,17 @@ CString CMyFanControlDlg::ExecuteCmd(CString str)
 		if (ReadFile(hRead, buffer, 4095, &byteRead, NULL) == NULL)
 			break;
 		if (byteRead)
-			output += buffer;
+			outputA += buffer;
 		if (i++ >= 50)
 			break;
 	}
-	return output;
+	CloseHandle(hRead);
+
+	// 关闭进程句柄，防止泄漏
+	CloseHandle(pi.hThread);
+	CloseHandle(pi.hProcess);
+
+	return CString(outputA);
 }
 
 BOOL CMyFanControlDlg::CreateTaskXml(PCSTR strXmlPath, PCSTR strTargetPath)
@@ -1063,7 +1224,7 @@ BOOL CMyFanControlDlg::CheckInputFrequency(int nFrequency)
 		{
 			char str2[256];
 			sprintf_s(str2, 256, "GPU默认频率为%d，超频会降低系统稳定性，并会增加发热量。\n注意：由于功率限制，可能无法达到设定的频率。\n是否确认要超频？", m_core.m_GpuInfo.m_nStandardFrequency);
-			int rv = MessageBox(str2, "确认要超频？", MB_YESNO);
+			int rv = MessageBox(str2, _T("确认要超频？"), MB_YESNO);
 
 			if (IDYES == rv)
 			{
@@ -1108,7 +1269,7 @@ void CMyFanControlDlg::OnBnClickedCheckLockMemOverclock()
 		// 安全警告
 		if (nMemOffset > 0)
 		{
-			int rv = MessageBox("修改显存频率可能导致系统不稳定或损坏显卡，是否确认？", "安全警告", MB_YESNO | MB_ICONWARNING);
+			int rv = MessageBox(_T("修改显存频率可能导致系统不稳定或损坏显卡，是否确认？"), _T("安全警告"), MB_YESNO | MB_ICONWARNING);
 			if (rv == IDNO)
 			{
 				m_ctlLockMemOverclock.SetCheck(FALSE);
