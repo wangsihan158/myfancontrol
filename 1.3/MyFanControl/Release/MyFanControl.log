@@ -1,0 +1,17 @@
+﻿  stdafx.cpp
+  GPUPowerSaveDlg.cpp
+D:\Code\MyFanControl\1.3\MyFanControl\GPUPowerSaveDlg.cpp(1,1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失
+D:\Code\MyFanControl\1.3\MyFanControl\GPUPowerSaveDlg.h(1,1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失
+  (编译源文件“/GPUPowerSaveDlg.cpp”)
+  
+  Core.cpp
+  MyFanControl.cpp
+  MyFanControlDlg.cpp
+D:\Code\MyFanControl\1.3\MyFanControl\GPUPowerSaveDlg.h(1,1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失
+  (编译源文件“/MyFanControlDlg.cpp”)
+  
+  正在生成代码
+  Previous IPDB was built with incompatible compiler, fall back to full compilation.
+  All 266 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  已完成代码的生成
+  MyFanControl.vcxproj -> D:\Code\MyFanControl\1.3\Release\MyFanControl.exe

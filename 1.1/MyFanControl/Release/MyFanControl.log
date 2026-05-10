@@ -1,0 +1,21 @@
+﻿  stdafx.cpp
+  Core.cpp
+  MyFanControl.cpp
+D:\Code\MyFanControl\1.1\MyFanControl\resource.h(59,9): warning C4005: “IDC_CHECK_LOCK_MEM_OVERCLOCK”: 宏重定义
+  (编译源文件“/MyFanControl.cpp”)
+      D:\Code\MyFanControl\1.1\MyFanControl\resource.h(46,9):
+      参见“IDC_CHECK_LOCK_MEM_OVERCLOCK”的前一个定义
+  
+  MyFanControlDlg.cpp
+D:\Code\MyFanControl\1.1\MyFanControl\resource.h(59,9): warning C4005: “IDC_CHECK_LOCK_MEM_OVERCLOCK”: 宏重定义
+  (编译源文件“/MyFanControlDlg.cpp”)
+      D:\Code\MyFanControl\1.1\MyFanControl\resource.h(46,9):
+      参见“IDC_CHECK_LOCK_MEM_OVERCLOCK”的前一个定义
+  
+resource.h(59): warning RC4005: 'IDC_CHECK_LOCK_MEM_OVERCLOCK' : redefinition
+  
+  正在生成代码
+  Previous IPDB not found, fall back to full compilation.
+  All 280 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  已完成代码的生成
+  MyFanControl.vcxproj -> D:\Code\MyFanControl\1.1\Release\MyFanControl.exe
